@@ -3,9 +3,13 @@
   "version": "0.0.1",
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": "v20.19.5"
+  },
   "scripts": {
-    "dev": "node index.js",
-    "start": "node index.js"
+    "dev": "nodemon index.js",
+    "start": "node index.js",
+    "postinstall": "npx playwright install --with-deps"
   },
   "dependencies": {
     "axios": "^1.6.8",
@@ -13,8 +17,12 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "jsdom": "^27.2.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.59.0",
-    "playwright": "^1.56.1"
+    "playwright": "^1.48.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
   }
 }

@@ -12,4 +12,40 @@ body {
   @apply bg-white rounded-2xl shadow-lg border border-slate-100;
 }
 
+/* PDF/Print page break styles */
+@media print {
+  .pdf-page-break {
+    page-break-before: always;
+  }
+  
+  .pdf-avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  
+  .pdf-section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+  }
+}
+
+/* For html2canvas PDF generation - add spacing to prevent awkward breaks */
+.pdf-section {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+}
+
+/* Add extra spacing between major sections for better PDF readability */
+.pdf-export > section {
+  margin-bottom: 2rem;
+}
+
+.pdf-export .pdf-section {
+  margin-bottom: 2rem;
+}
+
 
