@@ -23,6 +23,7 @@ build/
 # Playwright / Testing
 test-results/
 playwright-report/
+screenshots/
 
 # macOS
 .DS_Store
