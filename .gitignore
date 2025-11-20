@@ -25,6 +25,9 @@ test-results/
 playwright-report/
 screenshots/
 
+# Temporary files
+temp/
+
 # macOS
 .DS_Store
 **/.env
