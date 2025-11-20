@@ -22,6 +22,8 @@ const Results = () => {
   const [domLoading, setDomLoading] = useState(false);
   const [domError, setDomError] = useState('');
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [isEditingUrl, setIsEditingUrl] = useState(false);
+  const [editedUrl, setEditedUrl] = useState('');
   const reportRef = useRef(null);
 
   const fallbackData = useMemo(
@@ -186,21 +188,83 @@ const Results = () => {
     }
   };
 
+  const handleUrlEdit = () => {
+    setEditedUrl(decodeURIComponent(url || ''));
+    setIsEditingUrl(true);
+  };
+
+  const handleUrlSubmit = (e) => {
+    e.preventDefault();
+    if (!editedUrl.trim()) {
+      return;
+    }
+    // Navigate to new URL which will trigger new scan
+    navigate(`/results?url=${encodeURIComponent(editedUrl.trim())}`);
+    setIsEditingUrl(false);
+  };
+
+  const handleUrlCancel = () => {
+    setIsEditingUrl(false);
+    setEditedUrl('');
+  };
+
   if (!url) return null;
 
   return (
     <main ref={reportRef} className="mx-auto max-w-6xl px-6 py-10">
       <section className="card mb-8 p-8">
-        <div className="flex flex-col gap-2">
-          <p className="text-sm uppercase tracking-wide text-slate-500">
-            Scan Target
-          </p>
-          <h2 className="text-2xl font-semibold text-slate-900 break-all">
-            {decodeURIComponent(url)}
-          </h2>
-          <p className="text-slate-500">
-            AI-powered UI bug report
-          </p>
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm uppercase tracking-wide text-slate-500">
+              Scan Target
+            </p>
+            {!isEditingUrl && (
+              <button
+                onClick={handleUrlEdit}
+                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium transition-colors"
+              >
+                Edit URL
+              </button>
+            )}
+          </div>
+          
+          {isEditingUrl ? (
+            <form onSubmit={handleUrlSubmit} className="flex flex-col gap-3">
+              <input
+                type="url"
+                value={editedUrl}
+                onChange={(e) => setEditedUrl(e.target.value)}
+                placeholder="https://example.com"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                required
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  className="rounded-xl bg-indigo-600 px-4 py-2 text-white font-medium shadow-sm transition-all hover:bg-indigo-500"
+                >
+                  Scan New URL
+                </button>
+                <button
+                  type="button"
+                  onClick={handleUrlCancel}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-slate-700 font-medium shadow-sm transition-all hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <>
+              <h2 className="text-2xl font-semibold text-slate-900 break-all">
+                {decodeURIComponent(url)}
+              </h2>
+              <p className="text-slate-500">
+                AI-powered UI bug report
+              </p>
+            </>
+          )}
         </div>
       </section>
 
