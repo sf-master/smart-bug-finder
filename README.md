@@ -1,6 +1,6 @@
 ## Smart Bug Finder – System Overview
 
-This document captures the current architecture, data flow, and operational considerations for the Smart Bug Finder project. The goal is to provide developers with a single reference for how the frontend and backend interact, how the Playwright/Ollama pipeline works, and what is required to run or extend the system.
+This document captures the current architecture, data flow, and operational considerations for the Smart Bug Finder project. The goal is to provide developers with a single reference for how the frontend and backend interact, how the Playwright + Groq pipeline works, and what is required to run or extend the system.
 
 ---
 
@@ -19,14 +19,14 @@ This document captures the current architecture, data flow, and operational cons
         │                                   │ 1. Launch Playwright        │
         │                                   │ 2. Capture DOM/screenshot   │
         │                                   │ 3. Gather console/network   │
-        │                                   │ 4. Call llmHelper (Ollama)  │
+        │                                   │ 4. Call llmHelper (Groq)    │
         │                                   └──────────┬──────────────────┘
         │                                             │
         │                                             ▼
         │                                   ┌─────────────────────────────┐
-        │                                   │ Ollama LLM (local)          │
+        │                                   │ Groq LLM (API)              │
         │                                   │  • Model: configurable      │
-        │                                   │  • Endpoint: /api/generate  │
+        │                                   │  • Endpoint: Responses API  │
         │                                   │  • Returns structured JSON  │
         │                                   └─────────────────────────────┘
         │
@@ -58,7 +58,7 @@ This document captures the current architecture, data flow, and operational cons
 
 ### 3. Backend (server/)
 
-- **Stack**: Node.js (ESM), Express, Playwright (Chromium), Axios, dotenv, cors, body-parser.
+- **Stack**: Node.js (ESM), Express, Playwright (Chromium), dotenv, cors, body-parser.
 - **Entrypoint**: `server/index.js`
   - Loads `.env`.
   - Enables CORS for `http://localhost:5173` (adjust as needed in production).
@@ -84,13 +84,13 @@ This document captures the current architecture, data flow, and operational cons
       }
       ```
     - Ensures browser closes on both success and error paths.
-- **llmHelper (Ollama)**
+- **llmHelper (Groq)**
   - Environment variables:
-    - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-    - `OLLAMA_MODEL` (default `llama3.1` but any pulled model works, e.g., `phi3:mini`)
+    - `GROQ_API_KEY` (required)
+    - `GROQ_MODEL` (default `openai/gpt-oss-20b`)
   - Builds a textual prompt summarizing DOM, console errors, network issues, and screenshot size.
-  - Calls Ollama’s `/api/generate` with `stream: false` and `temperature: 0.2`.
-  - Parses the JSON response (`response.data.response`) into `{bugs, fixes, suggestions}`; returns fallback if parsing fails or request errors.
+  - Calls Groq’s OpenAI-compatible Responses API with `temperature: 0.2`.
+  - Parses `response.output_text` into `{bugs, fixes, suggestions}`; returns fallback if parsing fails or request errors.
 
 ---
 
@@ -106,15 +106,11 @@ This document captures the current architecture, data flow, and operational cons
 - `.env` template:
   ```
   PORT=5050
-  OLLAMA_BASE_URL=http://127.0.0.1:11434
-  OLLAMA_MODEL=phi3:mini   # or llama3.1, etc.
+  GROQ_API_KEY=sk_your_groq_key
+  GROQ_MODEL=openai/gpt-oss-20b
   ```
 - Requires local Playwright dependencies (`npx playwright install chromium`).
-- Requires a running Ollama daemon with the specified model pulled:
-  ```
-  ollama serve
-  ollama pull phi3:mini
-  ```
+- No local model runtime required.
 
 ---
 
@@ -126,7 +122,7 @@ This document captures the current architecture, data flow, and operational cons
    npm install
    npm run dev
    ```
-   Ensure `ollama serve` runs in another terminal and the chosen model is available.
+   Ensure `GROQ_API_KEY` is set and valid.
 
 2. **Frontend**:
    ```bash
@@ -144,7 +140,7 @@ This document captures the current architecture, data flow, and operational cons
 
 - **Backend**:
   - Deploy on a Node-compatible host with Chrome/Playwright dependencies (or use Playwright’s Docker image).
-  - Ensure Ollama is installed server-side or replace with a hosted LLM (OpenAI, etc.) if local inference isn’t desired. The abstraction in `llmHelper` is the main integration point.
+  - Provide `GROQ_API_KEY` securely (env/secret manager). The abstraction in `llmHelper` is the integration point if swapping providers.
   - Use HTTPS and proper authentication if exposing `/api/scan` publicly to avoid abuse.
   - Consider queueing or rate-limiting scans; Playwright launches can be resource-intensive.
 
@@ -154,14 +150,14 @@ This document captures the current architecture, data flow, and operational cons
 
 - **Observability**:
   - Add structured logging for Playwright events and LLM responses for debugging.
-  - Monitor Ollama logs for model load errors or memory constraints.
+  - Monitor Groq API usage/errors and rate limits.
   - Consider storing scan history if long-term audit trails are required.
 
 ---
 
 ### 7. Future Enhancements (Ideas)
 
-- **Multi-model support**: Allow selecting different Ollama models per request or fallback to a cloud LLM when local inference fails.
+- **Multi-model support**: Allow selecting different Groq models or add adapters for other hosted LLMs.
 - **Queued scans**: For resource control, convert `/api/scan` into an async job with progress updates/WebSockets.
 - **Authentication & roles**: Protect the scan endpoint from anonymous use if deployed externally.
 - **Analytics storage**: Persist scan results for historical reporting or shareable dashboards.
@@ -178,9 +174,8 @@ This document captures the current architecture, data flow, and operational cons
 | Axios wrapper | `client/src/services/api.js` | `scanWebsite(url)` |
 | Express server | `server/index.js` | CORS, routes, health |
 | Scan controller | `server/controllers/scanController.js` | Playwright orchestration |
-| LLM helper | `server/utils/llmHelper.js` | Ollama prompt & parsing |
+| LLM helper | `server/utils/llmHelper.js` | Groq prompt & parsing |
 | README (frontend) | `client/README.md` | Dev instructions |
 | README (backend) | `server/README.md` | Dev + env info |
 
 Use this document to onboard new developers quickly and to keep the system context aligned as the project evolves.
-
