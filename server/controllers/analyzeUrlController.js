@@ -1,5 +1,4 @@
 import axios from 'axios';
-import { JSDOM } from 'jsdom';
 import { chromium } from 'playwright';
 import { escapeCSSSelector, findElementWithMultipleStrategies } from '../utils/elementFinder.js';
 
@@ -73,14 +72,55 @@ const validateLink = async (href, baseUrl) => {
 };
 
 /**
- * Analyzes the HEAD section of the document
+ * Analyzes the HEAD section of the document using Playwright
  */
-const analyzeHead = async (head, baseUrl) => {
+const analyzeHead = async (page, baseUrl) => {
+  const headData = await page.evaluate(() => {
+    const head = document.head;
+    const analysis = {
+      title: {
+        hasTitle: false,
+        titleText: null
+      },
+      metaTags: [],
+      linkTags: []
+    };
+
+    // Analyze title
+    const titleElement = head.querySelector('title');
+    if (titleElement) {
+      analysis.title.hasTitle = true;
+      analysis.title.titleText = titleElement.textContent?.trim() || null;
+    }
+
+    // Analyze meta tags
+    const metaTags = head.querySelectorAll('meta');
+    metaTags.forEach((meta) => {
+      analysis.metaTags.push({
+        nameOrProperty: meta.getAttribute('name') || meta.getAttribute('property') || meta.getAttribute('http-equiv') || null,
+        contentOrValue: meta.getAttribute('content') || meta.getAttribute('charset') || null,
+        charset: meta.getAttribute('charset') || null,
+        httpEquiv: meta.getAttribute('http-equiv') || null,
+        property: meta.getAttribute('property') || null
+      });
+    });
+
+    // Analyze link tags
+    const linkTags = head.querySelectorAll('link');
+    linkTags.forEach((link) => {
+      analysis.linkTags.push({
+        href: link.getAttribute('href') || null,
+        rel: link.getAttribute('rel') || null,
+        type: link.getAttribute('type') || null,
+        as: link.getAttribute('as') || null
+      });
+    });
+
+    return analysis;
+  });
+
   const analysis = {
-    title: {
-      hasTitle: false,
-      titleText: null
-    },
+    title: headData.title,
     metaSummary: {
       important: [],
       all: []
@@ -88,40 +128,25 @@ const analyzeHead = async (head, baseUrl) => {
     linkSummary: []
   };
 
-  // Analyze title
-  const titleElement = head.querySelector('title');
-  if (titleElement) {
-    analysis.title.hasTitle = true;
-    analysis.title.titleText = titleElement.textContent?.trim() || null;
-  }
-
-  // Analyze meta tags
+  // Process meta tags
   const importantMetaNames = ['description', 'viewport', 'charset'];
-  const metaTags = head.querySelectorAll('meta');
-
-  metaTags.forEach((meta) => {
-    const metaInfo = {
-      nameOrProperty: meta.getAttribute('name') || meta.getAttribute('property') || meta.getAttribute('http-equiv') || null,
-      contentOrValue: meta.getAttribute('content') || meta.getAttribute('charset') || null,
-      charset: meta.getAttribute('charset') || null,
-      httpEquiv: meta.getAttribute('http-equiv') || null,
-      property: meta.getAttribute('property') || null
-    };
-
-    analysis.metaSummary.all.push(metaInfo);
+  headData.metaTags.forEach((meta) => {
+    analysis.metaSummary.all.push(meta);
 
     // Check if it's an important meta tag
-    if (metaInfo.nameOrProperty && importantMetaNames.includes(metaInfo.nameOrProperty.toLowerCase())) {
+    if (meta.nameOrProperty && importantMetaNames.includes(meta.nameOrProperty.toLowerCase())) {
       analysis.metaSummary.important.push({
-        ...metaInfo,
+        ...meta,
         present: true
       });
     }
   });
 
   // Check for charset via meta charset or http-equiv
-  const charsetMeta = head.querySelector('meta[charset]') || head.querySelector('meta[http-equiv="Content-Type"]');
-  if (!charsetMeta) {
+  const hasCharset = headData.metaTags.some(meta => 
+    meta.charset || meta.httpEquiv === 'Content-Type'
+  );
+  if (!hasCharset) {
     analysis.metaSummary.important.push({
       nameOrProperty: 'charset',
       contentOrValue: null,
@@ -143,17 +168,11 @@ const analyzeHead = async (head, baseUrl) => {
     }
   });
 
-  // Analyze link tags
-  const linkTags = head.querySelectorAll('link');
-  const linkPromises = Array.from(linkTags).map(async (link) => {
-    const href = link.getAttribute('href');
-    const validation = await validateLink(href, baseUrl);
-
+  // Analyze link tags with validation
+  const linkPromises = headData.linkTags.map(async (link) => {
+    const validation = await validateLink(link.href, baseUrl);
     return {
-      href: href || null,
-      rel: link.getAttribute('rel') || null,
-      type: link.getAttribute('type') || null,
-      as: link.getAttribute('as') || null,
+      ...link,
       ...validation
     };
   });
@@ -434,124 +453,130 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
 };
 
 /**
- * Analyzes the BODY section of the document
+ * Analyzes the BODY section of the document using Playwright
  */
-const analyzeBody = (body) => {
-  const analysis = {
-    buttons: [],
-    dropdowns: [],
-    inputs: [],
-    checkboxes: []
-  };
+const analyzeBody = async (page) => {
+  const bodyData = await page.evaluate(() => {
+    const body = document.body;
+    const analysis = {
+      buttons: [],
+      dropdowns: [],
+      inputs: [],
+      checkboxes: []
+    };
 
-  // Analyze buttons
-  const buttonElements = body.querySelectorAll('button');
-  buttonElements.forEach((button) => {
-    const text = button.textContent?.trim() || button.getAttribute('aria-label') || '';
-    const dataAttrs = {};
-    Array.from(button.attributes).forEach((attr) => {
-      if (attr.name.startsWith('data-')) {
-        dataAttrs[attr.name] = attr.value;
+    // Analyze buttons
+    const buttonElements = body.querySelectorAll('button');
+    buttonElements.forEach((button) => {
+      const text = button.textContent?.trim() || button.getAttribute('aria-label') || '';
+      const dataAttrs = {};
+      Array.from(button.attributes).forEach((attr) => {
+        if (attr.name.startsWith('data-')) {
+          dataAttrs[attr.name] = attr.value;
+        }
+      });
+
+      analysis.buttons.push({
+        type: button.getAttribute('type') || 'button',
+        text: text,
+        id: button.getAttribute('id') || null,
+        name: button.getAttribute('name') || null,
+        class: button.getAttribute('class') || null,
+        dataAttributes: Object.keys(dataAttrs).length > 0 ? dataAttrs : null
+      });
+    });
+
+    // Analyze input buttons (type="button|submit|reset")
+    const inputButtons = body.querySelectorAll('input[type="button"], input[type="submit"], input[type="reset"]');
+    inputButtons.forEach((input) => {
+      const inputId = input.getAttribute('id');
+      const label = input.closest('label')?.textContent?.trim() ||
+                    (inputId ? body.querySelector(`label[for="${inputId}"]`)?.textContent?.trim() : null) ||
+                    input.getAttribute('aria-label') ||
+                    input.getAttribute('value') ||
+                    '';
+
+      analysis.buttons.push({
+        type: input.getAttribute('type'),
+        text: label,
+        id: inputId || null,
+        name: input.getAttribute('name') || null,
+        class: input.getAttribute('class') || null,
+        dataAttributes: null
+      });
+    });
+
+    // Analyze dropdowns (select elements)
+    const selectElements = body.querySelectorAll('select');
+    selectElements.forEach((select) => {
+      const options = Array.from(select.querySelectorAll('option')).map((option) => ({
+        value: option.getAttribute('value') || option.textContent?.trim() || '',
+        text: option.textContent?.trim() || '',
+        selected: option.selected || option.hasAttribute('selected')
+      }));
+
+      analysis.dropdowns.push({
+        id: select.getAttribute('id') || null,
+        name: select.getAttribute('name') || null,
+        multiple: select.hasAttribute('multiple'),
+        options: options
+      });
+    });
+
+    // Analyze inputs (excluding checkboxes, radio, and button types)
+    const inputElements = body.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])');
+    inputElements.forEach((input) => {
+      const ariaAttrs = {};
+      Array.from(input.attributes).forEach((attr) => {
+        if (attr.name.startsWith('aria-')) {
+          ariaAttrs[attr.name] = attr.value;
+        }
+      });
+
+      analysis.inputs.push({
+        type: input.getAttribute('type') || 'text',
+        name: input.getAttribute('name') || null,
+        id: input.getAttribute('id') || null,
+        placeholder: input.getAttribute('placeholder') || null,
+        required: input.hasAttribute('required'),
+        ariaAttributes: Object.keys(ariaAttrs).length > 0 ? ariaAttrs : null
+      });
+    });
+
+    // Analyze checkboxes
+    const checkboxElements = body.querySelectorAll('input[type="checkbox"]');
+    checkboxElements.forEach((checkbox) => {
+      const checkboxId = checkbox.getAttribute('id');
+      let labelText = null;
+
+      // Try to find associated label
+      if (checkboxId) {
+        const label = body.querySelector(`label[for="${checkboxId}"]`);
+        if (label) {
+          labelText = label.textContent?.trim() || null;
+        }
       }
-    });
 
-    analysis.buttons.push({
-      type: button.getAttribute('type') || 'button',
-      text: text,
-      id: button.getAttribute('id') || null,
-      name: button.getAttribute('name') || null,
-      class: button.getAttribute('class') || null,
-      dataAttributes: Object.keys(dataAttrs).length > 0 ? dataAttrs : null
-    });
-  });
-
-  // Analyze input buttons (type="button|submit|reset")
-  const inputButtons = body.querySelectorAll('input[type="button"], input[type="submit"], input[type="reset"]');
-  inputButtons.forEach((input) => {
-    const label = input.closest('label')?.textContent?.trim() ||
-                  body.querySelector(`label[for="${input.getAttribute('id')}"]`)?.textContent?.trim() ||
-                  input.getAttribute('aria-label') ||
-                  input.getAttribute('value') ||
-                  '';
-
-    analysis.buttons.push({
-      type: input.getAttribute('type'),
-      text: label,
-      id: input.getAttribute('id') || null,
-      name: input.getAttribute('name') || null,
-      class: input.getAttribute('class') || null,
-      dataAttributes: null
-    });
-  });
-
-  // Analyze dropdowns (select elements)
-  const selectElements = body.querySelectorAll('select');
-  selectElements.forEach((select) => {
-    const options = Array.from(select.querySelectorAll('option')).map((option) => ({
-      value: option.getAttribute('value') || option.textContent?.trim() || '',
-      text: option.textContent?.trim() || '',
-      selected: option.selected || option.hasAttribute('selected')
-    }));
-
-    analysis.dropdowns.push({
-      id: select.getAttribute('id') || null,
-      name: select.getAttribute('name') || null,
-      multiple: select.hasAttribute('multiple'),
-      options: options
-    });
-  });
-
-  // Analyze inputs (excluding checkboxes, radio, and button types)
-  const inputElements = body.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])');
-  inputElements.forEach((input) => {
-    const ariaAttrs = {};
-    Array.from(input.attributes).forEach((attr) => {
-      if (attr.name.startsWith('aria-')) {
-        ariaAttrs[attr.name] = attr.value;
+      // If no label found, check if checkbox is wrapped in a label
+      if (!labelText) {
+        const parentLabel = checkbox.closest('label');
+        if (parentLabel) {
+          labelText = parentLabel.textContent?.trim() || null;
+        }
       }
+
+      analysis.checkboxes.push({
+        id: checkboxId || null,
+        name: checkbox.getAttribute('name') || null,
+        checked: checkbox.checked || checkbox.hasAttribute('checked'),
+        labelText: labelText
+      });
     });
 
-    analysis.inputs.push({
-      type: input.getAttribute('type') || 'text',
-      name: input.getAttribute('name') || null,
-      id: input.getAttribute('id') || null,
-      placeholder: input.getAttribute('placeholder') || null,
-      required: input.hasAttribute('required'),
-      ariaAttributes: Object.keys(ariaAttrs).length > 0 ? ariaAttrs : null
-    });
+    return analysis;
   });
 
-  // Analyze checkboxes
-  const checkboxElements = body.querySelectorAll('input[type="checkbox"]');
-  checkboxElements.forEach((checkbox) => {
-    const checkboxId = checkbox.getAttribute('id');
-    let labelText = null;
-
-    // Try to find associated label
-    if (checkboxId) {
-      const label = body.querySelector(`label[for="${checkboxId}"]`);
-      if (label) {
-        labelText = label.textContent?.trim() || null;
-      }
-    }
-
-    // If no label found, check if checkbox is wrapped in a label
-    if (!labelText) {
-      const parentLabel = checkbox.closest('label');
-      if (parentLabel) {
-        labelText = parentLabel.textContent?.trim() || null;
-      }
-    }
-
-    analysis.checkboxes.push({
-      id: checkboxId || null,
-      name: checkbox.getAttribute('name') || null,
-      checked: checkbox.checked || checkbox.hasAttribute('checked'),
-      labelText: labelText
-    });
-  });
-
-  return analysis;
+  return bodyData;
 };
 
 /**
@@ -604,30 +629,20 @@ export const analyzeUrl = async (req, res) => {
       // Wait for client-side JavaScript to render
       await page.waitForTimeout(3000);
 
-      // Get the fully rendered HTML
-      const html = await page.content();
+      // Verify page has loaded correctly
+      const hasHead = await page.evaluate(() => !!document.head);
+      const hasBody = await page.evaluate(() => !!document.body);
 
-      // Analyze HEAD and BODY from HTML
-      const dom = new JSDOM(html, {
-        url: url,
-        contentType: 'text/html',
-        runScripts: 'outside-only'
-      });
-
-      const document = dom.window.document;
-      const head = document.head;
-      const body = document.body;
-
-      if (!head || !body) {
+      if (!hasHead || !hasBody) {
         await browser.close();
         return res.status(500).json({
           error: 'Invalid HTML structure - missing head or body'
         });
       }
 
-      // Analyze HEAD and BODY structure
-      headAnalysis = await analyzeHead(head, url);
-      const bodyAnalysis = analyzeBody(body);
+      // Analyze HEAD and BODY structure using Playwright's DOM API
+      headAnalysis = await analyzeHead(page, url);
+      const bodyAnalysis = await analyzeBody(page);
 
       // Test interactive elements using Playwright (page is still open)
       const testResults = await testInteractiveElements(page, bodyAnalysis);
