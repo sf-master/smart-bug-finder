@@ -1,0 +1,30 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Build outputs
+dist/
+build/
+
+# Vite / React
+.vite/
+.cache/
+
+# Environment
+.env
+.env.*
+
+# Playwright / Testing
+test-results/
+playwright-report/
+
+# macOS
+.DS_Store
+**/.env
+**/node_modules
