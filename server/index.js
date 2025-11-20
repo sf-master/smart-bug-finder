@@ -20,6 +20,21 @@ app.use(
 app.use(bodyParser.json({ limit: '2mb' }));
 app.use('/api', scanRoute);
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Smart Bug Finder API Server',
+    status: 'running',
+    version: '0.0.1',
+    endpoints: {
+      health: '/health',
+      scan: '/api/scan',
+      analyzeUrl: '/api/analyze-url'
+    },
+    uptime: process.uptime(),
+    timestamp: Date.now()
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
