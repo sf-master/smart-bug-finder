@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Loader from '../components/Loader';
 import BugCard from '../components/BugCard';
 import { scanWebsite, analyzeUrl } from '../services/api';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 
 const Results = () => {
   const [searchParams] = useSearchParams();
@@ -19,6 +21,8 @@ const Results = () => {
   const [domAnalysis, setDomAnalysis] = useState(null);
   const [domLoading, setDomLoading] = useState(false);
   const [domError, setDomError] = useState('');
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const reportRef = useRef(null);
 
   const fallbackData = useMemo(
     () => ({
@@ -117,21 +121,74 @@ const Results = () => {
     fetchDomAnalysis();
   }, [url]);
 
-  const handleDownload = () => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json'
-    });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'smart-bug-finder-results.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
+  const handleDownload = async () => {
+    if (!reportRef.current) return;
+
+    try {
+      setPdfGenerating(true);
+
+      // Capture the report content as canvas
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#f1f5f9', // slate-50 background
+        windowWidth: reportRef.current.scrollWidth,
+        windowHeight: reportRef.current.scrollHeight
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Calculate PDF dimensions
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const pdfWidth = 210; // A4 width in mm
+      const pdfHeight = (imgHeight * pdfWidth) / imgWidth;
+      const pageHeight = 297; // A4 height in mm
+      
+      // Create PDF
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      
+      // If content fits on one page
+      if (pdfHeight <= pageHeight) {
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      } else {
+        // Content is taller than one page - split across multiple pages
+        let heightLeft = pdfHeight;
+        let position = 0;
+        
+        // Add first page
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+        
+        // Add additional pages if needed
+        while (heightLeft > 0) {
+          position -= pageHeight; // Move up by one page height
+          pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+          heightLeft -= pageHeight;
+        }
+      }
+      
+      // Generate filename with timestamp
+      const timestamp = new Date().toISOString().split('T')[0];
+      const urlSlug = decodeURIComponent(url || 'report').replace(/[^a-z0-9]/gi, '-').toLowerCase().substring(0, 30);
+      const filename = `smart-bug-finder-report-${urlSlug}-${timestamp}.pdf`;
+      
+      // Save PDF
+      pdf.save(filename);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try again.');
+    } finally {
+      setPdfGenerating(false);
+    }
   };
 
   if (!url) return null;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
+    <main ref={reportRef} className="mx-auto max-w-6xl px-6 py-10">
       <section className="card mb-8 p-8">
         <div className="flex flex-col gap-2">
           <p className="text-sm uppercase tracking-wide text-slate-500">
@@ -186,9 +243,10 @@ const Results = () => {
               </div>
               <button
                 onClick={handleDownload}
-                className="mt-6 w-full rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-700 font-medium shadow-sm transition-all hover:bg-white"
+                disabled={pdfGenerating}
+                className="mt-6 w-full rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-indigo-700 font-medium shadow-sm transition-all hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Download JSON Report
+                {pdfGenerating ? 'Generating PDF...' : 'Download PDF Report'}
               </button>
             </div>
           </section>
