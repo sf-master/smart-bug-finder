@@ -1,0 +1,386 @@
+import axios from 'axios';
+import { JSDOM } from 'jsdom';
+
+/**
+ * Validates a URL and checks if a link is reachable
+ */
+const validateLink = async (href, baseUrl) => {
+  if (!href) {
+    return {
+      status: 'invalidHref',
+      ok: false,
+      errorMessage: 'Missing href attribute'
+    };
+  }
+
+  try {
+    // Resolve relative URLs
+    const resolvedUrl = new URL(href, baseUrl).href;
+    const baseHost = new URL(baseUrl).hostname;
+    const linkHost = new URL(resolvedUrl).hostname;
+    const sameOrigin = baseHost === linkHost;
+
+    // Try to fetch the link (HEAD request first, fallback to GET)
+    try {
+      const response = await axios.head(resolvedUrl, {
+        timeout: 5000,
+        maxRedirects: 5,
+        validateStatus: () => true // Don't throw on any status
+      });
+
+      return {
+        status: response.status >= 200 && response.status < 400 ? 'valid' : 'broken',
+        statusCode: response.status,
+        ok: response.status >= 200 && response.status < 400,
+        sameOrigin,
+        errorMessage: response.status >= 400 ? `HTTP ${response.status}` : undefined
+      };
+    } catch (headError) {
+      // Fallback to GET if HEAD fails
+      try {
+        const response = await axios.get(resolvedUrl, {
+          timeout: 5000,
+          maxRedirects: 5,
+          validateStatus: () => true,
+          maxContentLength: 1024 // Only fetch small amount for validation
+        });
+
+        return {
+          status: response.status >= 200 && response.status < 400 ? 'valid' : 'broken',
+          statusCode: response.status,
+          ok: response.status >= 200 && response.status < 400,
+          sameOrigin,
+          errorMessage: response.status >= 400 ? `HTTP ${response.status}` : undefined
+        };
+      } catch (getError) {
+        return {
+          status: 'broken',
+          ok: false,
+          sameOrigin,
+          errorMessage: getError.message || 'Unable to reach URL'
+        };
+      }
+    }
+  } catch (error) {
+    return {
+      status: 'invalidHref',
+      ok: false,
+      errorMessage: error.message || 'Invalid URL format'
+    };
+  }
+};
+
+/**
+ * Analyzes the HEAD section of the document
+ */
+const analyzeHead = async (head, baseUrl) => {
+  const analysis = {
+    title: {
+      hasTitle: false,
+      titleText: null
+    },
+    metaSummary: {
+      important: [],
+      all: []
+    },
+    linkSummary: []
+  };
+
+  // Analyze title
+  const titleElement = head.querySelector('title');
+  if (titleElement) {
+    analysis.title.hasTitle = true;
+    analysis.title.titleText = titleElement.textContent?.trim() || null;
+  }
+
+  // Analyze meta tags
+  const importantMetaNames = ['description', 'viewport', 'charset'];
+  const metaTags = head.querySelectorAll('meta');
+
+  metaTags.forEach((meta) => {
+    const metaInfo = {
+      nameOrProperty: meta.getAttribute('name') || meta.getAttribute('property') || meta.getAttribute('http-equiv') || null,
+      contentOrValue: meta.getAttribute('content') || meta.getAttribute('charset') || null,
+      charset: meta.getAttribute('charset') || null,
+      httpEquiv: meta.getAttribute('http-equiv') || null,
+      property: meta.getAttribute('property') || null
+    };
+
+    analysis.metaSummary.all.push(metaInfo);
+
+    // Check if it's an important meta tag
+    if (metaInfo.nameOrProperty && importantMetaNames.includes(metaInfo.nameOrProperty.toLowerCase())) {
+      analysis.metaSummary.important.push({
+        ...metaInfo,
+        present: true
+      });
+    }
+  });
+
+  // Check for charset via meta charset or http-equiv
+  const charsetMeta = head.querySelector('meta[charset]') || head.querySelector('meta[http-equiv="Content-Type"]');
+  if (!charsetMeta) {
+    analysis.metaSummary.important.push({
+      nameOrProperty: 'charset',
+      contentOrValue: null,
+      present: false
+    });
+  }
+
+  // Ensure all important meta tags are checked
+  importantMetaNames.forEach((name) => {
+    const found = analysis.metaSummary.important.find(
+      (m) => m.nameOrProperty?.toLowerCase() === name.toLowerCase()
+    );
+    if (!found) {
+      analysis.metaSummary.important.push({
+        nameOrProperty: name,
+        contentOrValue: null,
+        present: false
+      });
+    }
+  });
+
+  // Analyze link tags
+  const linkTags = head.querySelectorAll('link');
+  const linkPromises = Array.from(linkTags).map(async (link) => {
+    const href = link.getAttribute('href');
+    const validation = await validateLink(href, baseUrl);
+
+    return {
+      href: href || null,
+      rel: link.getAttribute('rel') || null,
+      type: link.getAttribute('type') || null,
+      as: link.getAttribute('as') || null,
+      ...validation
+    };
+  });
+
+  analysis.linkSummary = await Promise.all(linkPromises);
+
+  return analysis;
+};
+
+/**
+ * Analyzes the BODY section of the document
+ */
+const analyzeBody = (body) => {
+  const analysis = {
+    buttons: [],
+    dropdowns: [],
+    inputs: [],
+    checkboxes: []
+  };
+
+  // Analyze buttons
+  const buttonElements = body.querySelectorAll('button');
+  buttonElements.forEach((button) => {
+    const text = button.textContent?.trim() || button.getAttribute('aria-label') || '';
+    const dataAttrs = {};
+    Array.from(button.attributes).forEach((attr) => {
+      if (attr.name.startsWith('data-')) {
+        dataAttrs[attr.name] = attr.value;
+      }
+    });
+
+    analysis.buttons.push({
+      type: button.getAttribute('type') || 'button',
+      text: text,
+      id: button.getAttribute('id') || null,
+      name: button.getAttribute('name') || null,
+      class: button.getAttribute('class') || null,
+      dataAttributes: Object.keys(dataAttrs).length > 0 ? dataAttrs : null
+    });
+  });
+
+  // Analyze input buttons (type="button|submit|reset")
+  const inputButtons = body.querySelectorAll('input[type="button"], input[type="submit"], input[type="reset"]');
+  inputButtons.forEach((input) => {
+    const label = input.closest('label')?.textContent?.trim() ||
+                  body.querySelector(`label[for="${input.getAttribute('id')}"]`)?.textContent?.trim() ||
+                  input.getAttribute('aria-label') ||
+                  input.getAttribute('value') ||
+                  '';
+
+    analysis.buttons.push({
+      type: input.getAttribute('type'),
+      text: label,
+      id: input.getAttribute('id') || null,
+      name: input.getAttribute('name') || null,
+      class: input.getAttribute('class') || null,
+      dataAttributes: null
+    });
+  });
+
+  // Analyze dropdowns (select elements)
+  const selectElements = body.querySelectorAll('select');
+  selectElements.forEach((select) => {
+    const options = Array.from(select.querySelectorAll('option')).map((option) => ({
+      value: option.getAttribute('value') || option.textContent?.trim() || '',
+      text: option.textContent?.trim() || '',
+      selected: option.selected || option.hasAttribute('selected')
+    }));
+
+    analysis.dropdowns.push({
+      id: select.getAttribute('id') || null,
+      name: select.getAttribute('name') || null,
+      multiple: select.hasAttribute('multiple'),
+      options: options
+    });
+  });
+
+  // Analyze inputs (excluding checkboxes, radio, and button types)
+  const inputElements = body.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])');
+  inputElements.forEach((input) => {
+    const ariaAttrs = {};
+    Array.from(input.attributes).forEach((attr) => {
+      if (attr.name.startsWith('aria-')) {
+        ariaAttrs[attr.name] = attr.value;
+      }
+    });
+
+    analysis.inputs.push({
+      type: input.getAttribute('type') || 'text',
+      name: input.getAttribute('name') || null,
+      id: input.getAttribute('id') || null,
+      placeholder: input.getAttribute('placeholder') || null,
+      required: input.hasAttribute('required'),
+      ariaAttributes: Object.keys(ariaAttrs).length > 0 ? ariaAttrs : null
+    });
+  });
+
+  // Analyze checkboxes
+  const checkboxElements = body.querySelectorAll('input[type="checkbox"]');
+  checkboxElements.forEach((checkbox) => {
+    const checkboxId = checkbox.getAttribute('id');
+    let labelText = null;
+
+    // Try to find associated label
+    if (checkboxId) {
+      const label = body.querySelector(`label[for="${checkboxId}"]`);
+      if (label) {
+        labelText = label.textContent?.trim() || null;
+      }
+    }
+
+    // If no label found, check if checkbox is wrapped in a label
+    if (!labelText) {
+      const parentLabel = checkbox.closest('label');
+      if (parentLabel) {
+        labelText = parentLabel.textContent?.trim() || null;
+      }
+    }
+
+    analysis.checkboxes.push({
+      id: checkboxId || null,
+      name: checkbox.getAttribute('name') || null,
+      checked: checkbox.checked || checkbox.hasAttribute('checked'),
+      labelText: labelText
+    });
+  });
+
+  return analysis;
+};
+
+/**
+ * Main controller function
+ */
+export const analyzeUrl = async (req, res) => {
+  try {
+    const { url } = req.query;
+
+    if (!url) {
+      return res.status(400).json({ error: 'Missing url query parameter' });
+    }
+
+    // Validate URL format
+    let targetUrl;
+    try {
+      targetUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL format' });
+    }
+
+    // Fetch HTML
+    let html;
+    try {
+      const response = await axios.get(url, {
+        timeout: 30000,
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Accept-Encoding': 'gzip, deflate',
+          'Connection': 'keep-alive'
+        },
+        // Ensure response is treated as text/html
+        responseType: 'text',
+        // Allow redirects and handle localhost URLs
+        validateStatus: (status) => status >= 200 && status < 400
+      });
+      html = response.data;
+    } catch (error) {
+      console.error('❌ Failed to fetch URL:', url, error.message);
+      
+      // Provide more specific error messages
+      let errorDetails = error.message;
+      if (error.code === 'ECONNREFUSED') {
+        errorDetails = 'Connection refused. Make sure the URL is accessible from the server.';
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        errorDetails = 'Request timed out. The server may be slow or unreachable.';
+      } else if (error.code === 'ENOTFOUND') {
+        errorDetails = 'Host not found. Check if the URL is correct.';
+      } else if (error.response) {
+        errorDetails = `HTTP ${error.response.status}: ${error.response.statusText}`;
+      }
+      
+      return res.status(500).json({
+        error: 'Failed to fetch URL',
+        details: errorDetails,
+        code: error.code
+      });
+    }
+
+    // Parse DOM
+    let dom;
+    try {
+      dom = new JSDOM(html, {
+        url: url,
+        contentType: 'text/html'
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: 'Failed to parse HTML',
+        details: error.message
+      });
+    }
+
+    const document = dom.window.document;
+    const head = document.head;
+    const body = document.body;
+
+    if (!head || !body) {
+      return res.status(500).json({
+        error: 'Invalid HTML structure - missing head or body'
+      });
+    }
+
+    // Analyze HEAD and BODY
+    const headAnalysis = await analyzeHead(head, url);
+    const bodyAnalysis = analyzeBody(body);
+
+    return res.status(200).json({
+      url,
+      headAnalysis,
+      bodyAnalysis
+    });
+  } catch (error) {
+    console.error('❌ AnalyzeUrl Error:', error);
+    return res.status(500).json({
+      error: 'Failed to analyze URL',
+      details: error.message
+    });
+  }
+};
+

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Loader from '../components/Loader';
 import BugCard from '../components/BugCard';
-import { scanWebsite } from '../services/api';
+import { scanWebsite, analyzeUrl } from '../services/api';
 
 const Results = () => {
   const [searchParams] = useSearchParams();
@@ -16,6 +16,9 @@ const Results = () => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [domAnalysis, setDomAnalysis] = useState(null);
+  const [domLoading, setDomLoading] = useState(false);
+  const [domError, setDomError] = useState('');
 
   const fallbackData = useMemo(
     () => ({
@@ -77,6 +80,43 @@ const Results = () => {
     fetchData();
   }, [url, navigate, fallbackData]);
 
+  // Format screenshot for display
+  const screenshotSrc = useMemo(() => {
+    if (!data.screenshot) return fallbackData.screenshot;
+    
+    // If it's already a data URI or URL, return as is
+    if (data.screenshot.startsWith('data:') || data.screenshot.startsWith('http')) {
+      return data.screenshot;
+    }
+    
+    // If it's a base64 string, add the data URI prefix
+    return `data:image/png;base64,${data.screenshot}`;
+  }, [data.screenshot, fallbackData.screenshot]);
+
+  // Fetch DOM analysis
+  useEffect(() => {
+    if (!url) return;
+
+    const fetchDomAnalysis = async () => {
+      try {
+        setDomLoading(true);
+        setDomError('');
+        const response = await analyzeUrl(url);
+        setDomAnalysis(response?.data || null);
+      } catch (err) {
+        const errorMessage = err?.response?.data?.error || err?.response?.data?.details || err?.message || 'Unknown error';
+        const details = err?.response?.data?.details ? `: ${err.response.data.details}` : '';
+        setDomError(`Unable to analyze DOM structure. ${errorMessage}${details}`);
+        setDomAnalysis(null);
+        console.error('DOM Analysis Error:', err);
+      } finally {
+        setDomLoading(false);
+      }
+    };
+
+    fetchDomAnalysis();
+  }, [url]);
+
   const handleDownload = () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], {
       type: 'application/json'
@@ -123,7 +163,7 @@ const Results = () => {
               </h3>
               <div className="mx-auto max-w-[800px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
                 <img
-                  src={data.screenshot}
+                  src={screenshotSrc}
                   alt="Scanned screenshot"
                   className="h-full w-full object-cover"
                 />
@@ -167,6 +207,335 @@ const Results = () => {
                 <BugCard key={bug.id ?? bug.title} bug={bug} />
               ))}
             </div>
+          </section>
+
+          {/* DOM Analysis Section */}
+          <section className="mt-12">
+            <div className="mb-6">
+              <h3 className="text-2xl font-semibold text-slate-900">
+                DOM Analysis
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Detailed analysis of HTML structure, meta tags, links, and interactive elements
+              </p>
+            </div>
+
+            {domLoading ? (
+              <div className="card p-8 text-center">
+                <Loader />
+                <p className="mt-4 text-slate-600">Analyzing DOM structure...</p>
+              </div>
+            ) : domError ? (
+              <div className="card p-6 rounded-xl border border-rose-200 bg-rose-50 text-rose-900">
+                {domError}
+              </div>
+            ) : domAnalysis ? (
+              <div className="space-y-8">
+                {/* Head Validation */}
+                <div className="card p-6">
+                  <h4 className="text-xl font-semibold text-slate-800 mb-4">
+                    Head Validation
+                  </h4>
+
+                  {/* Title & Meta Tags */}
+                  <div className="mb-6">
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Title & Meta Tags
+                    </h5>
+                    <div className="space-y-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-medium text-slate-700">Title Tag</span>
+                          <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                            domAnalysis.headAnalysis?.title?.hasTitle
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {domAnalysis.headAnalysis?.title?.hasTitle ? 'Present' : 'Missing'}
+                          </span>
+                        </div>
+                        {domAnalysis.headAnalysis?.title?.titleText && (
+                          <p className="text-sm text-slate-600 mt-1">
+                            "{domAnalysis.headAnalysis.title.titleText}"
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h6 className="font-medium text-slate-700 mb-3">Important Meta Tags</h6>
+                        <div className="space-y-2">
+                          {domAnalysis.headAnalysis?.metaSummary?.important?.map((meta, idx) => (
+                            <div key={idx} className="flex items-center justify-between text-sm">
+                              <span className="text-slate-600">{meta.nameOrProperty}</span>
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                meta.present
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {meta.present ? 'Present' : 'Missing'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {domAnalysis.headAnalysis?.metaSummary?.all?.length > 0 && (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                          <h6 className="font-medium text-slate-700 mb-3">All Meta Tags ({domAnalysis.headAnalysis.metaSummary.all.length})</h6>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-slate-200">
+                                  <th className="text-left py-2 px-3 text-slate-700 font-medium">Name/Property</th>
+                                  <th className="text-left py-2 px-3 text-slate-700 font-medium">Content/Value</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {domAnalysis.headAnalysis.metaSummary.all.map((meta, idx) => (
+                                  <tr key={idx} className="border-b border-slate-100">
+                                    <td className="py-2 px-3 text-slate-600">{meta.nameOrProperty || meta.property || meta.httpEquiv || '-'}</td>
+                                    <td className="py-2 px-3 text-slate-600">{meta.contentOrValue || meta.charset || '-'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Link Tags & Status */}
+                  <div>
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Link Tags & Status
+                    </h5>
+                    {domAnalysis.headAnalysis?.linkSummary?.length > 0 ? (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Href</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Rel</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Type</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Origin</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Status</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Code</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {domAnalysis.headAnalysis.linkSummary.map((link, idx) => (
+                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-3 px-4 text-slate-600 break-all max-w-xs">
+                                  {link.href || '-'}
+                                </td>
+                                <td className="py-3 px-4 text-slate-600">{link.rel || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{link.type || '-'}</td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    link.sameOrigin
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-purple-100 text-purple-700'
+                                  }`}>
+                                    {link.sameOrigin ? 'Same' : 'Cross'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    link.status === 'valid'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : link.status === 'broken'
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-amber-100 text-amber-700'
+                                  }`}>
+                                    {link.status || '-'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-slate-600">
+                                  {link.statusCode || '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">No link tags found</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Interactive Elements */}
+                <div className="card p-6">
+                  <h4 className="text-xl font-semibold text-slate-800 mb-4">
+                    Interactive Elements
+                  </h4>
+
+                  {/* Buttons */}
+                  <div className="mb-6">
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Buttons ({domAnalysis.bodyAnalysis?.buttons?.length || 0})
+                    </h5>
+                    {domAnalysis.bodyAnalysis?.buttons?.length > 0 ? (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Type</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Text/Label</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {domAnalysis.bodyAnalysis.buttons.map((button, idx) => (
+                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-3 px-4 text-slate-600">{button.type}</td>
+                                <td className="py-3 px-4 text-slate-600">{button.text || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{button.id || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{button.name || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">No buttons found</p>
+                    )}
+                  </div>
+
+                  {/* Dropdowns */}
+                  <div className="mb-6">
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Dropdowns ({domAnalysis.bodyAnalysis?.dropdowns?.length || 0})
+                    </h5>
+                    {domAnalysis.bodyAnalysis?.dropdowns?.length > 0 ? (
+                      <div className="space-y-4">
+                        {domAnalysis.bodyAnalysis.dropdowns.map((dropdown, idx) => (
+                          <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                            <div className="flex items-center gap-4 mb-2">
+                              <span className="text-sm font-medium text-slate-700">ID: {dropdown.id || '-'}</span>
+                              <span className="text-sm font-medium text-slate-700">Name: {dropdown.name || '-'}</span>
+                              {dropdown.multiple && (
+                                <span className="px-2 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700">
+                                  Multiple
+                                </span>
+                              )}
+                            </div>
+                            {dropdown.options?.length > 0 && (
+                              <div className="mt-2">
+                                <p className="text-xs text-slate-500 mb-1">Options ({dropdown.options.length}):</p>
+                                <div className="space-y-1">
+                                  {dropdown.options.slice(0, 5).map((option, optIdx) => (
+                                    <div key={optIdx} className="text-sm text-slate-600 flex items-center gap-2">
+                                      <span>{option.text || option.value}</span>
+                                      {option.selected && (
+                                        <span className="px-1.5 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">
+                                          Selected
+                                        </span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {dropdown.options.length > 5 && (
+                                    <p className="text-xs text-slate-400">... and {dropdown.options.length - 5} more</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">No dropdowns found</p>
+                    )}
+                  </div>
+
+                  {/* Inputs */}
+                  <div className="mb-6">
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Inputs ({domAnalysis.bodyAnalysis?.inputs?.length || 0})
+                    </h5>
+                    {domAnalysis.bodyAnalysis?.inputs?.length > 0 ? (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Type</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Placeholder</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Required</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {domAnalysis.bodyAnalysis.inputs.map((input, idx) => (
+                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-3 px-4 text-slate-600">{input.type}</td>
+                                <td className="py-3 px-4 text-slate-600">{input.name || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{input.id || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{input.placeholder || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {input.required ? (
+                                    <span className="px-2 py-1 rounded text-xs font-semibold bg-rose-100 text-rose-700">
+                                      Yes
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">No</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">No inputs found</p>
+                    )}
+                  </div>
+
+                  {/* Checkboxes */}
+                  <div>
+                    <h5 className="text-lg font-medium text-slate-700 mb-3">
+                      Checkboxes ({domAnalysis.bodyAnalysis?.checkboxes?.length || 0})
+                    </h5>
+                    {domAnalysis.bodyAnalysis?.checkboxes?.length > 0 ? (
+                      <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <table className="w-full text-sm">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Label</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Checked</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {domAnalysis.bodyAnalysis.checkboxes.map((checkbox, idx) => (
+                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                <td className="py-3 px-4 text-slate-600">{checkbox.id || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{checkbox.name || '-'}</td>
+                                <td className="py-3 px-4 text-slate-600">{checkbox.labelText || '-'}</td>
+                                <td className="py-3 px-4">
+                                  {checkbox.checked ? (
+                                    <span className="px-2 py-1 rounded text-xs font-semibold bg-emerald-100 text-emerald-700">
+                                      Checked
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">Unchecked</span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">No checkboxes found</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </section>
         </>
       )}
