@@ -130,17 +130,26 @@ const Results = () => {
     try {
       setPdfGenerating(true);
 
-      // Capture the report content as canvas
+      // Add temporary class for better PDF rendering
+      const originalClasses = reportRef.current.className;
+      reportRef.current.classList.add('pdf-export');
+
+      // Capture the report content as canvas with better settings
       const canvas = await html2canvas(reportRef.current, {
         scale: 2,
         useCORS: true,
         logging: false,
         backgroundColor: '#f1f5f9', // slate-50 background
         windowWidth: reportRef.current.scrollWidth,
-        windowHeight: reportRef.current.scrollHeight
+        windowHeight: reportRef.current.scrollHeight,
+        removeContainer: false,
+        allowTaint: true
       });
 
-      const imgData = canvas.toDataURL('image/png');
+      // Restore original classes
+      reportRef.current.className = originalClasses;
+
+      const imgData = canvas.toDataURL('image/png', 0.95);
       
       // Calculate PDF dimensions
       const imgWidth = canvas.width;
@@ -148,28 +157,56 @@ const Results = () => {
       const pdfWidth = 210; // A4 width in mm
       const pdfHeight = (imgHeight * pdfWidth) / imgWidth;
       const pageHeight = 297; // A4 height in mm
+      const pageMargin = 10; // Margin in mm
+      const usablePageHeight = pageHeight - (pageMargin * 2);
       
       // Create PDF
       const pdf = new jsPDF('p', 'mm', 'a4');
       
       // If content fits on one page
-      if (pdfHeight <= pageHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      if (pdfHeight <= usablePageHeight) {
+        pdf.addImage(imgData, 'PNG', pageMargin, pageMargin, pdfWidth - (pageMargin * 2), pdfHeight);
       } else {
-        // Content is taller than one page - split across multiple pages
-        let heightLeft = pdfHeight;
-        let position = 0;
+        // Content is taller than one page - split across multiple pages with better handling
+        let sourceY = 0; // Position in the source image (in pixels)
+        let pageNumber = 0;
+        const imgHeightInPixels = canvas.height;
+        const pixelsPerMM = imgHeightInPixels / pdfHeight;
+        const pixelsPerPage = usablePageHeight * pixelsPerMM;
         
-        // Add first page
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-        heightLeft -= pageHeight;
-        
-        // Add additional pages if needed
-        while (heightLeft > 0) {
-          position -= pageHeight; // Move up by one page height
-          pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
-          heightLeft -= pageHeight;
+        while (sourceY < imgHeightInPixels) {
+          if (pageNumber > 0) {
+            pdf.addPage();
+          }
+          
+          // Calculate how much of the image to show on this page
+          const remainingHeight = imgHeightInPixels - sourceY;
+          const heightToShow = Math.min(pixelsPerPage, remainingHeight);
+          const heightInMM = (heightToShow / pixelsPerMM);
+          
+          // Create a temporary canvas for this page
+          const pageCanvas = document.createElement('canvas');
+          pageCanvas.width = canvas.width;
+          pageCanvas.height = heightToShow;
+          const pageCtx = pageCanvas.getContext('2d');
+          
+          // Fill with background color first for clean edges
+          pageCtx.fillStyle = '#f1f5f9';
+          pageCtx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          
+          // Draw the portion of the image for this page
+          pageCtx.drawImage(
+            canvas,
+            0, sourceY, canvas.width, heightToShow, // Source rectangle
+            0, 0, canvas.width, heightToShow // Destination rectangle
+          );
+          
+          const pageImgData = pageCanvas.toDataURL('image/png', 0.95);
+          pdf.addImage(pageImgData, 'PNG', pageMargin, pageMargin, pdfWidth - (pageMargin * 2), heightInMM);
+          
+          // Move to next page position
+          sourceY += pixelsPerPage;
+          pageNumber++;
         }
       }
       
@@ -278,7 +315,7 @@ const Results = () => {
             </div>
           )}
 
-          <section className="grid gap-8 lg:grid-cols-2">
+          <section className="grid gap-8 lg:grid-cols-2 pdf-section">
             <div className="card p-6">
               <h3 className="mb-4 text-lg font-semibold text-slate-800">
                 Screenshot Preview
@@ -316,7 +353,7 @@ const Results = () => {
             </div>
           </section>
 
-          <section className="mt-10">
+          <section className="mt-10 pdf-section">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">
                 AI Detected Issues(Coming Soon)
@@ -333,7 +370,7 @@ const Results = () => {
           </section>
 
           {/* DOM Analysis Section */}
-          <section className="mt-12">
+          <section className="mt-12 pdf-section">
             <div className="mb-6">
               <h3 className="text-2xl font-semibold text-slate-900">
                 DOM Analysis
@@ -355,7 +392,7 @@ const Results = () => {
             ) : domAnalysis ? (
               <div className="space-y-8">
                 {/* Head Validation */}
-                <div className="card p-6">
+                <div className="card p-6 pdf-section">
                   <h4 className="text-xl font-semibold text-slate-800 mb-4">
                     Head Validation
                   </h4>
@@ -489,7 +526,7 @@ const Results = () => {
                 </div>
 
                 {/* Interactive Elements */}
-                <div className="card p-6">
+                <div className="card p-6 pdf-section">
                   <h4 className="text-xl font-semibold text-slate-800 mb-4">
                     Interactive Elements
                   </h4>
