@@ -1,5 +1,6 @@
 import { chromium } from "playwright";
 import { analyzeScanData } from "../utils/llmHelper.js";
+import { checkUrlAccessible } from "../utils/urlHelper.js";
 
 export const scanWebsite = async (req, res) => {
   let browser = null;
@@ -13,11 +14,15 @@ export const scanWebsite = async (req, res) => {
       return res.status(400).json({ error: "Missing url query parameter" });
     }
 
-    // Validate URL format
-    try {
-      new URL(url);
-    } catch {
-      return res.status(400).json({ error: "Invalid URL format" });
+    // 🔍 Step 1: Validate URL accessibility
+    const validation = await checkUrlAccessible(url);
+
+    if (!validation.ok) {
+      return res.status(400).json({
+        error: "URL is not accessible",
+        details: validation.error,
+        status: validation.status
+      });
     }
 
     const consoleErrors = [];
