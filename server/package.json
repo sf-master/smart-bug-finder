@@ -3,6 +3,9 @@
   "version": "0.0.1",
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": "v20.19.5"
+  },
   "scripts": {
     "dev": "nodemon index.js",
     "start": "node index.js",
