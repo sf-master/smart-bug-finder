@@ -464,6 +464,9 @@ const Results = () => {
                                         }`}>
                                           {test.clickable ? '✓ Clickable' : '✗ Not Clickable'}
                                         </span>
+                                        {test.selector && (
+                                          <span className="text-xs text-slate-500" title="Selector used">Selector: {test.selector}</span>
+                                        )}
                                         {test.error && (
                                           <span className="text-xs text-rose-600">{test.error}</span>
                                         )}
@@ -512,6 +515,9 @@ const Results = () => {
                                   </span>
                                 )}
                               </div>
+                              {test?.selector && (
+                                <p className="text-xs text-slate-500 mb-1" title="Selector used">Selector: {test.selector}</p>
+                              )}
                               {test?.error && (
                                 <p className="text-xs text-rose-600 mb-2">{test.error}</p>
                               )}
@@ -578,6 +584,9 @@ const Results = () => {
                                         }`}>
                                           {test.fillable ? '✓ Fillable' : '✗ Not Fillable'}
                                         </span>
+                                        {test.selector && (
+                                          <span className="text-xs text-slate-500" title="Selector used">Selector: {test.selector}</span>
+                                        )}
                                         {test.readonly && (
                                           <span className="text-xs text-amber-600">Read-only</span>
                                         )}
@@ -637,6 +646,9 @@ const Results = () => {
                                         }`}>
                                           {test.toggleable ? '✓ Toggleable' : '✗ Not Toggleable'}
                                         </span>
+                                        {test.selector && (
+                                          <span className="text-xs text-slate-500" title="Selector used">Selector: {test.selector}</span>
+                                        )}
                                         {test.error && (
                                           <span className="text-xs text-rose-600">{test.error}</span>
                                         )}

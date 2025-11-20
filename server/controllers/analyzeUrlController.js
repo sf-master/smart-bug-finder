@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
 import { chromium } from 'playwright';
+import { escapeCSSSelector, findElementWithMultipleStrategies } from '../utils/elementFinder.js';
 
 /**
  * Validates a URL and checks if a link is reachable
@@ -176,43 +177,25 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
   // Test buttons
   for (const button of bodyAnalysis.buttons) {
     try {
-      let selector = null;
-      if (button.id) {
-        selector = `#${button.id.replace(/[#.]/g, '\\$&')}`;
-      } else if (button.name) {
-        selector = `button[name="${button.name}"], input[type="button"][name="${button.name}"], input[type="submit"][name="${button.name}"], input[type="reset"][name="${button.name}"]`;
-      }
+      const { element, selector } = await findElementWithMultipleStrategies(page, button, 'button');
 
-      if (selector) {
-        const element = await page.$(selector);
-        if (element) {
-          const isVisible = await element.isVisible().catch(() => false);
-          const isEnabled = await element.isEnabled().catch(() => false);
-          const boundingBox = await element.boundingBox().catch(() => null);
-          const isClickable = isVisible && isEnabled && boundingBox !== null;
+      if (element) {
+        const isVisible = await element.isVisible().catch(() => false);
+        const isEnabled = await element.isEnabled().catch(() => false);
+        const boundingBox = await element.boundingBox().catch(() => null);
+        const isClickable = isVisible && isEnabled && boundingBox !== null;
 
-          testResults.buttons.push({
-            ...button,
-            testResults: {
-              clickable: isClickable,
-              visible: isVisible,
-              enabled: isEnabled,
-              hasDimensions: boundingBox !== null,
-              error: null
-            }
-          });
-        } else {
-          testResults.buttons.push({
-            ...button,
-            testResults: {
-              clickable: false,
-              visible: false,
-              enabled: false,
-              hasDimensions: false,
-              error: 'Element not found in DOM'
-            }
-          });
-        }
+        testResults.buttons.push({
+          ...button,
+          testResults: {
+            clickable: isClickable,
+            visible: isVisible,
+            enabled: isEnabled,
+            hasDimensions: boundingBox !== null,
+            selector: selector,
+            error: null
+          }
+        });
       } else {
         testResults.buttons.push({
           ...button,
@@ -221,7 +204,8 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
             visible: false,
             enabled: false,
             hasDimensions: false,
-            error: 'No selector available (missing id or name)'
+            selector: null,
+            error: 'Element not found using any selector strategy'
           }
         });
       }
@@ -233,6 +217,7 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
           visible: false,
           enabled: false,
           hasDimensions: false,
+          selector: null,
           error: error.message
         }
       });
@@ -242,62 +227,42 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
   // Test inputs
   for (const input of bodyAnalysis.inputs) {
     try {
-      let selector = null;
-      if (input.id) {
-        selector = `#${input.id.replace(/[#.]/g, '\\$&')}`;
-      } else if (input.name) {
-        selector = `input[name="${input.name}"]:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])`;
-      }
+      const { element, selector } = await findElementWithMultipleStrategies(page, input, 'input');
 
-      if (selector) {
-        const element = await page.$(selector);
-        if (element) {
-          const isVisible = await element.isVisible().catch(() => false);
-          const isEnabled = await element.isEnabled().catch(() => false);
-          const isReadOnly = await element.getAttribute('readonly').catch(() => null) !== null;
-          const isDisabled = await element.getAttribute('disabled').catch(() => null) !== null;
-          const boundingBox = await element.boundingBox().catch(() => null);
-          const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
+      if (element) {
+        const isVisible = await element.isVisible().catch(() => false);
+        const isEnabled = await element.isEnabled().catch(() => false);
+        const isReadOnly = await element.getAttribute('readonly').catch(() => null) !== null;
+        const isDisabled = await element.getAttribute('disabled').catch(() => null) !== null;
+        const boundingBox = await element.boundingBox().catch(() => null);
+        const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
 
-          // Try to fill with test text
-          let fillable = false;
-          if (isFillable) {
-            try {
-              await element.fill('test', { timeout: 1000 });
-              fillable = true;
-              // Clear the test text
-              await element.fill('').catch(() => {});
-            } catch {
-              fillable = false;
-            }
+        // Try to fill with test text
+        let fillable = false;
+        if (isFillable) {
+          try {
+            await element.fill('test', { timeout: 1000 });
+            fillable = true;
+            // Clear the test text
+            await element.fill('').catch(() => {});
+          } catch {
+            fillable = false;
           }
-
-          testResults.inputs.push({
-            ...input,
-            testResults: {
-              fillable: fillable,
-              visible: isVisible,
-              enabled: isEnabled,
-              readonly: isReadOnly,
-              disabled: isDisabled,
-              hasDimensions: boundingBox !== null,
-              error: null
-            }
-          });
-        } else {
-          testResults.inputs.push({
-            ...input,
-            testResults: {
-              fillable: false,
-              visible: false,
-              enabled: false,
-              readonly: false,
-              disabled: false,
-              hasDimensions: false,
-              error: 'Element not found in DOM'
-            }
-          });
         }
+
+        testResults.inputs.push({
+          ...input,
+          testResults: {
+            fillable: fillable,
+            visible: isVisible,
+            enabled: isEnabled,
+            readonly: isReadOnly,
+            disabled: isDisabled,
+            hasDimensions: boundingBox !== null,
+            selector: selector,
+            error: null
+          }
+        });
       } else {
         testResults.inputs.push({
           ...input,
@@ -308,7 +273,8 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
             readonly: false,
             disabled: false,
             hasDimensions: false,
-            error: 'No selector available (missing id or name)'
+            selector: null,
+            error: 'Element not found using any selector strategy'
           }
         });
       }
@@ -322,6 +288,7 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
           readonly: false,
           disabled: false,
           hasDimensions: false,
+          selector: null,
           error: error.message
         }
       });
@@ -331,57 +298,38 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
   // Test dropdowns
   for (const dropdown of bodyAnalysis.dropdowns) {
     try {
-      let selector = null;
-      if (dropdown.id) {
-        selector = `#${dropdown.id.replace(/[#.]/g, '\\$&')}`;
-      } else if (dropdown.name) {
-        selector = `select[name="${dropdown.name}"]`;
-      }
+      const { element, selector } = await findElementWithMultipleStrategies(page, dropdown, 'select');
 
-      if (selector) {
-        const element = await page.$(selector);
-        if (element) {
-          const isVisible = await element.isVisible().catch(() => false);
-          const isEnabled = await element.isEnabled().catch(() => false);
-          const boundingBox = await element.boundingBox().catch(() => null);
-          const isClickable = isVisible && isEnabled && boundingBox !== null;
+      if (element) {
+        const isVisible = await element.isVisible().catch(() => false);
+        const isEnabled = await element.isEnabled().catch(() => false);
+        const boundingBox = await element.boundingBox().catch(() => null);
+        const isClickable = isVisible && isEnabled && boundingBox !== null;
 
-          // Try to select an option
-          let selectable = false;
-          if (isClickable && dropdown.options && dropdown.options.length > 0) {
-            try {
-              const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
-              await element.selectOption(firstOptionValue, { timeout: 1000 });
-              selectable = true;
-            } catch {
-              selectable = false;
-            }
+        // Try to select an option
+        let selectable = false;
+        if (isClickable && dropdown.options && dropdown.options.length > 0) {
+          try {
+            const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
+            await element.selectOption(firstOptionValue, { timeout: 1000 });
+            selectable = true;
+          } catch {
+            selectable = false;
           }
-
-          testResults.dropdowns.push({
-            ...dropdown,
-            testResults: {
-              clickable: isClickable,
-              selectable: selectable,
-              visible: isVisible,
-              enabled: isEnabled,
-              hasDimensions: boundingBox !== null,
-              error: null
-            }
-          });
-        } else {
-          testResults.dropdowns.push({
-            ...dropdown,
-            testResults: {
-              clickable: false,
-              selectable: false,
-              visible: false,
-              enabled: false,
-              hasDimensions: false,
-              error: 'Element not found in DOM'
-            }
-          });
         }
+
+        testResults.dropdowns.push({
+          ...dropdown,
+          testResults: {
+            clickable: isClickable,
+            selectable: selectable,
+            visible: isVisible,
+            enabled: isEnabled,
+            hasDimensions: boundingBox !== null,
+            selector: selector,
+            error: null
+          }
+        });
       } else {
         testResults.dropdowns.push({
           ...dropdown,
@@ -391,7 +339,8 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
             visible: false,
             enabled: false,
             hasDimensions: false,
-            error: 'No selector available (missing id or name)'
+            selector: null,
+            error: 'Element not found using any selector strategy'
           }
         });
       }
@@ -404,6 +353,7 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
           visible: false,
           enabled: false,
           hasDimensions: false,
+          selector: null,
           error: error.message
         }
       });
@@ -413,62 +363,43 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
   // Test checkboxes
   for (const checkbox of bodyAnalysis.checkboxes) {
     try {
-      let selector = null;
-      if (checkbox.id) {
-        selector = `#${checkbox.id.replace(/[#.]/g, '\\$&')}`;
-      } else if (checkbox.name) {
-        selector = `input[type="checkbox"][name="${checkbox.name}"]`;
-      }
+      const { element, selector } = await findElementWithMultipleStrategies(page, checkbox, 'checkbox');
 
-      if (selector) {
-        const element = await page.$(selector);
-        if (element) {
-          const isVisible = await element.isVisible().catch(() => false);
-          const isEnabled = await element.isEnabled().catch(() => false);
-          const boundingBox = await element.boundingBox().catch(() => null);
-          const isClickable = isVisible && isEnabled && boundingBox !== null;
+      if (element) {
+        const isVisible = await element.isVisible().catch(() => false);
+        const isEnabled = await element.isEnabled().catch(() => false);
+        const boundingBox = await element.boundingBox().catch(() => null);
+        const isClickable = isVisible && isEnabled && boundingBox !== null;
 
-          // Try to toggle checkbox
-          let toggleable = false;
-          if (isClickable) {
-            try {
-              const wasChecked = await element.isChecked().catch(() => false);
-              await element.click({ timeout: 1000 });
-              const isNowChecked = await element.isChecked().catch(() => false);
-              toggleable = wasChecked !== isNowChecked;
-              // Toggle back if it changed
-              if (toggleable) {
-                await element.click().catch(() => {});
-              }
-            } catch {
-              toggleable = false;
+        // Try to toggle checkbox
+        let toggleable = false;
+        if (isClickable) {
+          try {
+            const wasChecked = await element.isChecked().catch(() => false);
+            await element.click({ timeout: 1000 });
+            const isNowChecked = await element.isChecked().catch(() => false);
+            toggleable = wasChecked !== isNowChecked;
+            // Toggle back if it changed
+            if (toggleable) {
+              await element.click().catch(() => {});
             }
+          } catch {
+            toggleable = false;
           }
-
-          testResults.checkboxes.push({
-            ...checkbox,
-            testResults: {
-              clickable: isClickable,
-              toggleable: toggleable,
-              visible: isVisible,
-              enabled: isEnabled,
-              hasDimensions: boundingBox !== null,
-              error: null
-            }
-          });
-        } else {
-          testResults.checkboxes.push({
-            ...checkbox,
-            testResults: {
-              clickable: false,
-              toggleable: false,
-              visible: false,
-              enabled: false,
-              hasDimensions: false,
-              error: 'Element not found in DOM'
-            }
-          });
         }
+
+        testResults.checkboxes.push({
+          ...checkbox,
+          testResults: {
+            clickable: isClickable,
+            toggleable: toggleable,
+            visible: isVisible,
+            enabled: isEnabled,
+            hasDimensions: boundingBox !== null,
+            selector: selector,
+            error: null
+          }
+        });
       } else {
         testResults.checkboxes.push({
           ...checkbox,
@@ -478,7 +409,8 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
             visible: false,
             enabled: false,
             hasDimensions: false,
-            error: 'No selector available (missing id or name)'
+            selector: null,
+            error: 'Element not found using any selector strategy'
           }
         });
       }
@@ -491,6 +423,7 @@ const testInteractiveElements = async (page, bodyAnalysis) => {
           visible: false,
           enabled: false,
           hasDimensions: false,
+          selector: null,
           error: error.message
         }
       });
