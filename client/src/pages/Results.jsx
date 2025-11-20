@@ -82,7 +82,8 @@ const Results = () => {
     };
 
     fetchData();
-  }, [url, navigate, fallbackData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url, navigate]); // fallbackData is stable from useMemo, no need to include
 
   // Format screenshot for display
   const screenshotSrc = useMemo(() => {
@@ -95,7 +96,7 @@ const Results = () => {
     
     // If it's a base64 string, add the data URI prefix
     return `data:image/png;base64,${data.screenshot}`;
-  }, [data.screenshot, fallbackData.screenshot]);
+  }, [data.screenshot]); // fallbackData.screenshot is stable, no need to include
 
   // Fetch DOM analysis
   useEffect(() => {

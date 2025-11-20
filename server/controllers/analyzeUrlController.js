@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { JSDOM } from 'jsdom';
+import { chromium } from 'playwright';
 
 /**
  * Validates a URL and checks if a link is reachable
@@ -286,6 +287,10 @@ const analyzeBody = (body) => {
  * Main controller function
  */
 export const analyzeUrl = async (req, res) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
   try {
     const { url } = req.query;
 
@@ -301,44 +306,54 @@ export const analyzeUrl = async (req, res) => {
       return res.status(400).json({ error: 'Invalid URL format' });
     }
 
-    // Fetch HTML
+    // Use Playwright to get fully rendered DOM (with JavaScript executed)
     let html;
     try {
-      const response = await axios.get(url, {
-        timeout: 30000,
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Accept-Encoding': 'gzip, deflate',
-          'Connection': 'keep-alive'
-        },
-        // Ensure response is treated as text/html
-        responseType: 'text',
-        // Allow redirects and handle localhost URLs
-        validateStatus: (status) => status >= 200 && status < 400
+      console.log(`🔍 Analyzing DOM for: ${url}`);
+
+      // Launch browser
+      browser = await chromium.launch({ headless: true });
+
+      context = await browser.newContext({
+        viewport: { width: 1366, height: 768 },
+        ignoreHTTPSErrors: true,
+        javaScriptEnabled: true
       });
-      html = response.data;
+
+      page = await context.newPage();
+
+      // Navigate to URL and wait for content to load
+      await page.goto(url, {
+        waitUntil: 'networkidle',
+        timeout: 60000
+      });
+
+      // Wait for client-side JavaScript to render
+      await page.waitForTimeout(3000);
+
+      // Get the fully rendered HTML
+      html = await page.content();
+
+      await browser.close();
+      browser = null;
     } catch (error) {
-      console.error('❌ Failed to fetch URL:', url, error.message);
+      console.error('❌ Failed to fetch URL with Playwright:', url, error.message);
       
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+
       // Provide more specific error messages
       let errorDetails = error.message;
-      if (error.code === 'ECONNREFUSED') {
-        errorDetails = 'Connection refused. Make sure the URL is accessible from the server.';
-      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
-        errorDetails = 'Request timed out. The server may be slow or unreachable.';
-      } else if (error.code === 'ENOTFOUND') {
+      if (error.message.includes('net::ERR_CONNECTION_REFUSED') || error.message.includes('Navigation timeout')) {
+        errorDetails = 'Connection refused or timeout. Make sure the URL is accessible from the server.';
+      } else if (error.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
         errorDetails = 'Host not found. Check if the URL is correct.';
-      } else if (error.response) {
-        errorDetails = `HTTP ${error.response.status}: ${error.response.statusText}`;
       }
       
       return res.status(500).json({
         error: 'Failed to fetch URL',
-        details: errorDetails,
-        code: error.code
+        details: errorDetails
       });
     }
 
@@ -347,7 +362,8 @@ export const analyzeUrl = async (req, res) => {
     try {
       dom = new JSDOM(html, {
         url: url,
-        contentType: 'text/html'
+        contentType: 'text/html',
+        runScripts: 'outside-only' // Don't run scripts again, we already have rendered content
       });
     } catch (error) {
       return res.status(500).json({
@@ -377,6 +393,11 @@ export const analyzeUrl = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ AnalyzeUrl Error:', error);
+
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+
     return res.status(500).json({
       error: 'Failed to analyze URL',
       details: error.message
