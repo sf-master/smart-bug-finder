@@ -443,18 +443,38 @@ const Results = () => {
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Type</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Text/Label</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
-                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Test Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {domAnalysis.bodyAnalysis.buttons.map((button, idx) => (
-                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                <td className="py-3 px-4 text-slate-600">{button.type}</td>
-                                <td className="py-3 px-4 text-slate-600">{button.text || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{button.id || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{button.name || '-'}</td>
-                              </tr>
-                            ))}
+                            {domAnalysis.bodyAnalysis.buttons.map((button, idx) => {
+                              const test = button.testResults;
+                              return (
+                                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                  <td className="py-3 px-4 text-slate-600">{button.type}</td>
+                                  <td className="py-3 px-4 text-slate-600">{button.text || '-'}</td>
+                                  <td className="py-3 px-4 text-slate-600">{button.id || '-'}</td>
+                                  <td className="py-3 px-4">
+                                    {test ? (
+                                      <div className="flex flex-col gap-1">
+                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                          test.clickable
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-rose-100 text-rose-700'
+                                        }`}>
+                                          {test.clickable ? '✓ Clickable' : '✗ Not Clickable'}
+                                        </span>
+                                        {test.error && (
+                                          <span className="text-xs text-rose-600">{test.error}</span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-xs">Not tested</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -470,17 +490,31 @@ const Results = () => {
                     </h5>
                     {domAnalysis.bodyAnalysis?.dropdowns?.length > 0 ? (
                       <div className="space-y-4">
-                        {domAnalysis.bodyAnalysis.dropdowns.map((dropdown, idx) => (
-                          <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                            <div className="flex items-center gap-4 mb-2">
-                              <span className="text-sm font-medium text-slate-700">ID: {dropdown.id || '-'}</span>
-                              <span className="text-sm font-medium text-slate-700">Name: {dropdown.name || '-'}</span>
-                              {dropdown.multiple && (
-                                <span className="px-2 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700">
-                                  Multiple
-                                </span>
+                        {domAnalysis.bodyAnalysis.dropdowns.map((dropdown, idx) => {
+                          const test = dropdown.testResults;
+                          return (
+                            <div key={idx} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                              <div className="flex items-center gap-4 mb-2 flex-wrap">
+                                <span className="text-sm font-medium text-slate-700">ID: {dropdown.id || '-'}</span>
+                                <span className="text-sm font-medium text-slate-700">Name: {dropdown.name || '-'}</span>
+                                {dropdown.multiple && (
+                                  <span className="px-2 py-1 rounded text-xs font-semibold bg-blue-100 text-blue-700">
+                                    Multiple
+                                  </span>
+                                )}
+                                {test && (
+                                  <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    test.selectable
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-rose-100 text-rose-700'
+                                  }`}>
+                                    {test.selectable ? '✓ Selectable' : '✗ Not Selectable'}
+                                  </span>
+                                )}
+                              </div>
+                              {test?.error && (
+                                <p className="text-xs text-rose-600 mb-2">{test.error}</p>
                               )}
-                            </div>
                             {dropdown.options?.length > 0 && (
                               <div className="mt-2">
                                 <p className="text-xs text-slate-500 mb-1">Options ({dropdown.options.length}):</p>
@@ -501,8 +535,9 @@ const Results = () => {
                                 </div>
                               </div>
                             )}
-                          </div>
-                        ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <p className="text-slate-500 text-sm">No dropdowns found</p>
@@ -522,28 +557,44 @@ const Results = () => {
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Type</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
-                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Placeholder</th>
-                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Required</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Test Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {domAnalysis.bodyAnalysis.inputs.map((input, idx) => (
-                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                <td className="py-3 px-4 text-slate-600">{input.type}</td>
-                                <td className="py-3 px-4 text-slate-600">{input.name || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{input.id || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{input.placeholder || '-'}</td>
-                                <td className="py-3 px-4">
-                                  {input.required ? (
-                                    <span className="px-2 py-1 rounded text-xs font-semibold bg-rose-100 text-rose-700">
-                                      Yes
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">No</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                            {domAnalysis.bodyAnalysis.inputs.map((input, idx) => {
+                              const test = input.testResults;
+                              return (
+                                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                  <td className="py-3 px-4 text-slate-600">{input.type}</td>
+                                  <td className="py-3 px-4 text-slate-600">{input.name || '-'}</td>
+                                  <td className="py-3 px-4 text-slate-600">{input.id || '-'}</td>
+                                  <td className="py-3 px-4">
+                                    {test ? (
+                                      <div className="flex flex-col gap-1">
+                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                          test.fillable
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-rose-100 text-rose-700'
+                                        }`}>
+                                          {test.fillable ? '✓ Fillable' : '✗ Not Fillable'}
+                                        </span>
+                                        {test.readonly && (
+                                          <span className="text-xs text-amber-600">Read-only</span>
+                                        )}
+                                        {test.disabled && (
+                                          <span className="text-xs text-slate-500">Disabled</span>
+                                        )}
+                                        {test.error && (
+                                          <span className="text-xs text-rose-600">{test.error}</span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-xs">Not tested</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -565,26 +616,38 @@ const Results = () => {
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">ID</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Name</th>
                               <th className="text-left py-3 px-4 text-slate-700 font-medium">Label</th>
-                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Checked</th>
+                              <th className="text-left py-3 px-4 text-slate-700 font-medium">Test Status</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {domAnalysis.bodyAnalysis.checkboxes.map((checkbox, idx) => (
-                              <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
-                                <td className="py-3 px-4 text-slate-600">{checkbox.id || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{checkbox.name || '-'}</td>
-                                <td className="py-3 px-4 text-slate-600">{checkbox.labelText || '-'}</td>
-                                <td className="py-3 px-4">
-                                  {checkbox.checked ? (
-                                    <span className="px-2 py-1 rounded text-xs font-semibold bg-emerald-100 text-emerald-700">
-                                      Checked
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">Unchecked</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
+                            {domAnalysis.bodyAnalysis.checkboxes.map((checkbox, idx) => {
+                              const test = checkbox.testResults;
+                              return (
+                                <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                                  <td className="py-3 px-4 text-slate-600">{checkbox.id || '-'}</td>
+                                  <td className="py-3 px-4 text-slate-600">{checkbox.name || '-'}</td>
+                                  <td className="py-3 px-4 text-slate-600">{checkbox.labelText || '-'}</td>
+                                  <td className="py-3 px-4">
+                                    {test ? (
+                                      <div className="flex flex-col gap-1">
+                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                          test.toggleable
+                                            ? 'bg-emerald-100 text-emerald-700'
+                                            : 'bg-rose-100 text-rose-700'
+                                        }`}>
+                                          {test.toggleable ? '✓ Toggleable' : '✗ Not Toggleable'}
+                                        </span>
+                                        {test.error && (
+                                          <span className="text-xs text-rose-600">{test.error}</span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-xs">Not tested</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

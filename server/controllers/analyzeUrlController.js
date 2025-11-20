@@ -163,6 +163,344 @@ const analyzeHead = async (head, baseUrl) => {
 };
 
 /**
+ * Tests interactive elements using Playwright
+ */
+const testInteractiveElements = async (page, bodyAnalysis) => {
+  const testResults = {
+    buttons: [],
+    dropdowns: [],
+    inputs: [],
+    checkboxes: []
+  };
+
+  // Test buttons
+  for (const button of bodyAnalysis.buttons) {
+    try {
+      let selector = null;
+      if (button.id) {
+        selector = `#${button.id.replace(/[#.]/g, '\\$&')}`;
+      } else if (button.name) {
+        selector = `button[name="${button.name}"], input[type="button"][name="${button.name}"], input[type="submit"][name="${button.name}"], input[type="reset"][name="${button.name}"]`;
+      }
+
+      if (selector) {
+        const element = await page.$(selector);
+        if (element) {
+          const isVisible = await element.isVisible().catch(() => false);
+          const isEnabled = await element.isEnabled().catch(() => false);
+          const boundingBox = await element.boundingBox().catch(() => null);
+          const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+          testResults.buttons.push({
+            ...button,
+            testResults: {
+              clickable: isClickable,
+              visible: isVisible,
+              enabled: isEnabled,
+              hasDimensions: boundingBox !== null,
+              error: null
+            }
+          });
+        } else {
+          testResults.buttons.push({
+            ...button,
+            testResults: {
+              clickable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              error: 'Element not found in DOM'
+            }
+          });
+        }
+      } else {
+        testResults.buttons.push({
+          ...button,
+          testResults: {
+            clickable: false,
+            visible: false,
+            enabled: false,
+            hasDimensions: false,
+            error: 'No selector available (missing id or name)'
+          }
+        });
+      }
+    } catch (error) {
+      testResults.buttons.push({
+        ...button,
+        testResults: {
+          clickable: false,
+          visible: false,
+          enabled: false,
+          hasDimensions: false,
+          error: error.message
+        }
+      });
+    }
+  }
+
+  // Test inputs
+  for (const input of bodyAnalysis.inputs) {
+    try {
+      let selector = null;
+      if (input.id) {
+        selector = `#${input.id.replace(/[#.]/g, '\\$&')}`;
+      } else if (input.name) {
+        selector = `input[name="${input.name}"]:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"])`;
+      }
+
+      if (selector) {
+        const element = await page.$(selector);
+        if (element) {
+          const isVisible = await element.isVisible().catch(() => false);
+          const isEnabled = await element.isEnabled().catch(() => false);
+          const isReadOnly = await element.getAttribute('readonly').catch(() => null) !== null;
+          const isDisabled = await element.getAttribute('disabled').catch(() => null) !== null;
+          const boundingBox = await element.boundingBox().catch(() => null);
+          const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
+
+          // Try to fill with test text
+          let fillable = false;
+          if (isFillable) {
+            try {
+              await element.fill('test', { timeout: 1000 });
+              fillable = true;
+              // Clear the test text
+              await element.fill('').catch(() => {});
+            } catch {
+              fillable = false;
+            }
+          }
+
+          testResults.inputs.push({
+            ...input,
+            testResults: {
+              fillable: fillable,
+              visible: isVisible,
+              enabled: isEnabled,
+              readonly: isReadOnly,
+              disabled: isDisabled,
+              hasDimensions: boundingBox !== null,
+              error: null
+            }
+          });
+        } else {
+          testResults.inputs.push({
+            ...input,
+            testResults: {
+              fillable: false,
+              visible: false,
+              enabled: false,
+              readonly: false,
+              disabled: false,
+              hasDimensions: false,
+              error: 'Element not found in DOM'
+            }
+          });
+        }
+      } else {
+        testResults.inputs.push({
+          ...input,
+          testResults: {
+            fillable: false,
+            visible: false,
+            enabled: false,
+            readonly: false,
+            disabled: false,
+            hasDimensions: false,
+            error: 'No selector available (missing id or name)'
+          }
+        });
+      }
+    } catch (error) {
+      testResults.inputs.push({
+        ...input,
+        testResults: {
+          fillable: false,
+          visible: false,
+          enabled: false,
+          readonly: false,
+          disabled: false,
+          hasDimensions: false,
+          error: error.message
+        }
+      });
+    }
+  }
+
+  // Test dropdowns
+  for (const dropdown of bodyAnalysis.dropdowns) {
+    try {
+      let selector = null;
+      if (dropdown.id) {
+        selector = `#${dropdown.id.replace(/[#.]/g, '\\$&')}`;
+      } else if (dropdown.name) {
+        selector = `select[name="${dropdown.name}"]`;
+      }
+
+      if (selector) {
+        const element = await page.$(selector);
+        if (element) {
+          const isVisible = await element.isVisible().catch(() => false);
+          const isEnabled = await element.isEnabled().catch(() => false);
+          const boundingBox = await element.boundingBox().catch(() => null);
+          const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+          // Try to select an option
+          let selectable = false;
+          if (isClickable && dropdown.options && dropdown.options.length > 0) {
+            try {
+              const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
+              await element.selectOption(firstOptionValue, { timeout: 1000 });
+              selectable = true;
+            } catch {
+              selectable = false;
+            }
+          }
+
+          testResults.dropdowns.push({
+            ...dropdown,
+            testResults: {
+              clickable: isClickable,
+              selectable: selectable,
+              visible: isVisible,
+              enabled: isEnabled,
+              hasDimensions: boundingBox !== null,
+              error: null
+            }
+          });
+        } else {
+          testResults.dropdowns.push({
+            ...dropdown,
+            testResults: {
+              clickable: false,
+              selectable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              error: 'Element not found in DOM'
+            }
+          });
+        }
+      } else {
+        testResults.dropdowns.push({
+          ...dropdown,
+          testResults: {
+            clickable: false,
+            selectable: false,
+            visible: false,
+            enabled: false,
+            hasDimensions: false,
+            error: 'No selector available (missing id or name)'
+          }
+        });
+      }
+    } catch (error) {
+      testResults.dropdowns.push({
+        ...dropdown,
+        testResults: {
+          clickable: false,
+          selectable: false,
+          visible: false,
+          enabled: false,
+          hasDimensions: false,
+          error: error.message
+        }
+      });
+    }
+  }
+
+  // Test checkboxes
+  for (const checkbox of bodyAnalysis.checkboxes) {
+    try {
+      let selector = null;
+      if (checkbox.id) {
+        selector = `#${checkbox.id.replace(/[#.]/g, '\\$&')}`;
+      } else if (checkbox.name) {
+        selector = `input[type="checkbox"][name="${checkbox.name}"]`;
+      }
+
+      if (selector) {
+        const element = await page.$(selector);
+        if (element) {
+          const isVisible = await element.isVisible().catch(() => false);
+          const isEnabled = await element.isEnabled().catch(() => false);
+          const boundingBox = await element.boundingBox().catch(() => null);
+          const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+          // Try to toggle checkbox
+          let toggleable = false;
+          if (isClickable) {
+            try {
+              const wasChecked = await element.isChecked().catch(() => false);
+              await element.click({ timeout: 1000 });
+              const isNowChecked = await element.isChecked().catch(() => false);
+              toggleable = wasChecked !== isNowChecked;
+              // Toggle back if it changed
+              if (toggleable) {
+                await element.click().catch(() => {});
+              }
+            } catch {
+              toggleable = false;
+            }
+          }
+
+          testResults.checkboxes.push({
+            ...checkbox,
+            testResults: {
+              clickable: isClickable,
+              toggleable: toggleable,
+              visible: isVisible,
+              enabled: isEnabled,
+              hasDimensions: boundingBox !== null,
+              error: null
+            }
+          });
+        } else {
+          testResults.checkboxes.push({
+            ...checkbox,
+            testResults: {
+              clickable: false,
+              toggleable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              error: 'Element not found in DOM'
+            }
+          });
+        }
+      } else {
+        testResults.checkboxes.push({
+          ...checkbox,
+          testResults: {
+            clickable: false,
+            toggleable: false,
+            visible: false,
+            enabled: false,
+            hasDimensions: false,
+            error: 'No selector available (missing id or name)'
+          }
+        });
+      }
+    } catch (error) {
+      testResults.checkboxes.push({
+        ...checkbox,
+        testResults: {
+          clickable: false,
+          toggleable: false,
+          visible: false,
+          enabled: false,
+          hasDimensions: false,
+          error: error.message
+        }
+      });
+    }
+  }
+
+  return testResults;
+};
+
+/**
  * Analyzes the BODY section of the document
  */
 const analyzeBody = (body) => {
@@ -307,7 +645,9 @@ export const analyzeUrl = async (req, res) => {
     }
 
     // Use Playwright to get fully rendered DOM (with JavaScript executed)
-    let html;
+    let headAnalysis;
+    let bodyAnalysisWithTests;
+    
     try {
       console.log(`🔍 Analyzing DOM for: ${url}`);
 
@@ -332,7 +672,40 @@ export const analyzeUrl = async (req, res) => {
       await page.waitForTimeout(3000);
 
       // Get the fully rendered HTML
-      html = await page.content();
+      const html = await page.content();
+
+      // Analyze HEAD and BODY from HTML
+      const dom = new JSDOM(html, {
+        url: url,
+        contentType: 'text/html',
+        runScripts: 'outside-only'
+      });
+
+      const document = dom.window.document;
+      const head = document.head;
+      const body = document.body;
+
+      if (!head || !body) {
+        await browser.close();
+        return res.status(500).json({
+          error: 'Invalid HTML structure - missing head or body'
+        });
+      }
+
+      // Analyze HEAD and BODY structure
+      headAnalysis = await analyzeHead(head, url);
+      const bodyAnalysis = analyzeBody(body);
+
+      // Test interactive elements using Playwright (page is still open)
+      const testResults = await testInteractiveElements(page, bodyAnalysis);
+
+      // Merge test results with body analysis
+      bodyAnalysisWithTests = {
+        buttons: testResults.buttons,
+        dropdowns: testResults.dropdowns,
+        inputs: testResults.inputs,
+        checkboxes: testResults.checkboxes
+      };
 
       await browser.close();
       browser = null;
@@ -357,39 +730,11 @@ export const analyzeUrl = async (req, res) => {
       });
     }
 
-    // Parse DOM
-    let dom;
-    try {
-      dom = new JSDOM(html, {
-        url: url,
-        contentType: 'text/html',
-        runScripts: 'outside-only' // Don't run scripts again, we already have rendered content
-      });
-    } catch (error) {
-      return res.status(500).json({
-        error: 'Failed to parse HTML',
-        details: error.message
-      });
-    }
-
-    const document = dom.window.document;
-    const head = document.head;
-    const body = document.body;
-
-    if (!head || !body) {
-      return res.status(500).json({
-        error: 'Invalid HTML structure - missing head or body'
-      });
-    }
-
-    // Analyze HEAD and BODY
-    const headAnalysis = await analyzeHead(head, url);
-    const bodyAnalysis = analyzeBody(body);
-
+    // Return the analysis
     return res.status(200).json({
       url,
       headAnalysis,
-      bodyAnalysis
+      bodyAnalysis: bodyAnalysisWithTests
     });
   } catch (error) {
     console.error('❌ AnalyzeUrl Error:', error);
