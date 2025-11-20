@@ -32,27 +32,27 @@ const Results = () => {
       bugs: [
         {
           id: 1,
-          title: 'Button text overlaps icon',
-          description: 'Primary CTA button on hero overlaps icon when viewport width < 1024px.',
+          title: 'Lorem ipsum dolor sit amet',
+          description: 'Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.',
           severity: 'High'
         },
         {
           id: 2,
-          title: 'Low contrast on footer links',
-          description: 'Footer links (#99A3AF) on white background fail WCAG AA contrast.',
+          title: 'Sed ut perspiciatis unde omnis',
+          description: 'Iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi.',
           severity: 'Medium'
         },
         {
           id: 3,
-          title: 'Misaligned card titles',
-          description: 'Card titles not vertically centered relative to card height.',
+          title: 'Nemo enim ipsam voluptatem',
+          description: 'Quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.',
           severity: 'Low'
         }
       ],
       fixes: [
-        'Adjust button padding and ensure flex container wraps content correctly for smaller viewports.',
-        'Darken footer link color to meet at least 4.5:1 contrast ratio.',
-        'Apply consistent line-height and align-items center on card containers.'
+        'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+        'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
+        'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.'
       ]
     }),
     []
@@ -295,7 +295,7 @@ const Results = () => {
             <div className="card flex flex-col justify-between p-6">
               <div>
                 <h3 className="mb-4 text-lg font-semibold text-slate-800">
-                  AI Suggested Fixes
+                  AI Suggested Fixes(Coming Soon)
                 </h3>
                 <ul className="space-y-3 text-slate-600">
                   {data.fixes.map((fix, idx) => (
@@ -319,7 +319,7 @@ const Results = () => {
           <section className="mt-10">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">
-                Detected Issues
+                AI Detected Issues(Coming Soon)
               </h3>
               <span className="text-sm text-slate-500">
                 {data.bugs.length} issues found
