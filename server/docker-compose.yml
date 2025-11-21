@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  smart-bug-finder-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-bug-finder-server
+    restart: unless-stopped
+    ports:
+      - "8080:5050"
+    environment:
+      - NODE_ENV=production
+      - PORT=5050
+      - CLIENT_ORIGIN=${CLIENT_ORIGIN:-https://smart-bug-finder.vercel.app}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma:2b}
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:5050/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
