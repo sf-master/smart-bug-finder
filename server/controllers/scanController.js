@@ -1,9 +1,6 @@
 import { chromium } from "playwright";
 import { analyzeScanData } from "../utils/llmHelper.js";
 import { checkUrlAccessible } from "../utils/urlHelper.js";
-import { takeFullPageScreenshot, takeScrollScreenshots } from "../utils/screenshotHelper.js";
-import fs from "fs";
-import path from "path";
 
 export const scanWebsite = async (req, res) => {
   let browser = null;
@@ -40,7 +37,7 @@ export const scanWebsite = async (req, res) => {
     });
 
     context = await browser.newContext({
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 1366, height: 768 },
       ignoreHTTPSErrors: true,
       javaScriptEnabled: true
     });
@@ -96,36 +93,27 @@ export const scanWebsite = async (req, res) => {
     const dom = await page.content();
 
     // Take screenshot of viewport only (what's visible when page first loads)
+    // This is much faster than fullPage: true which scrolls through entire page
     const screenshotBuffer = await page.screenshot({ 
-      fullPage: false,
+      fullPage: false, // Only capture viewport (1366x768)
       timeout: 5000
     });
-    const screenshotBase64 = screenshotBuffer.toString("base64");
-
-    // --- Screenshot File Saving Logic ---
-    const outputDir = path.join(process.cwd(), 'screenshots');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const baseFilename = url.replace(/https?:\/\//, "").replace(/[^a-zA-Z0-9]/g, "_");
-    const screenshotFilename = `${baseFilename}_${timestamp}.png`;
-    fs.writeFileSync(path.join(outputDir, screenshotFilename), screenshotBuffer);
-    // ------------------------------------
+    const screenshot = screenshotBuffer.toString("base64");
 
     await browser.close();
 
+    // Call LLM (Safe Retry)
     const llmResult = await analyzeScanData({
       url,
       dom,
       consoleErrors,
       networkErrors,
-      screenshot: screenshotBase64 // Provide one screenshot to the LLM for analysis
+      screenshot
     });
 
     return res.status(200).json({
       url,
-      screenshot: screenshotFilename, // Return single filename
+      screenshot,
       bugs: llmResult.bugs || [],
       fixes: llmResult.fixes || [],
       suggestions: llmResult.suggestions || [],

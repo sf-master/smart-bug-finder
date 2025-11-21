@@ -2,10 +2,9 @@
   "watch": ["controllers", "routes", "utils", "index.js"],
   "ext": "js,json",
   "ignore": ["node_modules", "*.test.js"],
-  "exec": "node -r dotenv/config index.js",
+  "exec": "node index.js",
   "env": {
     "NODE_ENV": "development"
   },
   "delay": 1000
 }
-

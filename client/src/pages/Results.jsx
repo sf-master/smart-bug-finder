@@ -93,19 +93,16 @@ const Results = () => {
 
   // Format screenshot for display
   const screenshotSrc = useMemo(() => {
-    if (!data.screenshot || data.screenshot.includes('placehold.co')) {
-      return fallbackData.screenshot;
-    }
+    if (!data.screenshot) return fallbackData.screenshot;
     
-    // If it's already a full URL, return as is
-    if (data.screenshot.startsWith('http')) {
+    // If it's already a data URI or URL, return as is
+    if (data.screenshot.startsWith('data:') || data.screenshot.startsWith('http')) {
       return data.screenshot;
     }
     
-    // In development, VITE_API_BASE_URL is empty, so we default to localhost
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050';
-    return `${baseUrl}/screenshots/${data.screenshot}`;
-  }, [data.screenshot, fallbackData.screenshot]);
+    // If it's a base64 string, add the data URI prefix
+    return `data:image/png;base64,${data.screenshot}`;
+  }, [data.screenshot]); // fallbackData.screenshot is stable, no need to include
 
   // Fetch DOM analysis with progressive loading
   useEffect(() => {
@@ -381,7 +378,7 @@ const Results = () => {
             <div className="card flex flex-col justify-between p-6">
               <div>
                 <h3 className="mb-4 text-lg font-semibold text-slate-800">
-                  AI Suggested Fixes
+                  AI Suggested Fixes(Coming Soon)
                 </h3>
                 <ul className="space-y-3 text-slate-600">
                   {data.fixes.map((fix, idx) => (
@@ -405,7 +402,7 @@ const Results = () => {
           <section className="mt-10 pdf-section">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">
-                AI Detected Issues
+                AI Detected Issues(Coming Soon)
               </h3>
               <span className="text-sm text-slate-500">
                 {data.bugs.length} issues found
@@ -869,7 +866,3 @@ const Results = () => {
 };
 
 export default Results;
-
-
-
-
