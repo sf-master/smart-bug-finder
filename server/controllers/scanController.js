@@ -29,9 +29,11 @@ export const scanWebsite = async (req, res) => {
     const networkErrors = [];
 
     // Playwright launch with performance optimizations
+    // NOTE: Don't disable images - we need them for screenshots!
+    // We'll block fonts/media via route handler instead
     browser = await chromium.launch({ 
       headless: true,
-      args: ['--disable-images', '--disable-javascript-harmony-shipping']
+      args: ['--disable-javascript-harmony-shipping']
     });
 
     context = await browser.newContext({
@@ -78,21 +80,24 @@ export const scanWebsite = async (req, res) => {
 
     console.log(`🔍 Navigating to: ${url}`);
 
-    // Use 'domcontentloaded' first, then wait for networkidle with shorter timeout
+    // Navigate and wait for DOM to be ready
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
-      timeout: 60000 // Reduced from 5 minutes to 1 minute
+      timeout: 60000
     });
 
-    // Wait for network to settle (with timeout) and client-side JS to render
-    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
-      // If networkidle times out, continue anyway - DOM is already loaded
-    });
-    await page.waitForTimeout(1000); // Reduced from 3s to 1s
+    // For viewport screenshot, we don't need to wait for networkidle
+    // Just wait briefly for initial render and some images to load
+    await page.waitForTimeout(800); // Brief wait for CSS/JS to render viewport
 
     const dom = await page.content();
 
-    const screenshotBuffer = await page.screenshot({ fullPage: true });
+    // Take screenshot of viewport only (what's visible when page first loads)
+    // This is much faster than fullPage: true which scrolls through entire page
+    const screenshotBuffer = await page.screenshot({ 
+      fullPage: false, // Only capture viewport (1366x768)
+      timeout: 5000
+    });
     const screenshot = screenshotBuffer.toString("base64");
 
     await browser.close();
