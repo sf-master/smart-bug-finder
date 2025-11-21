@@ -378,7 +378,7 @@ const Results = () => {
             <div className="card flex flex-col justify-between p-6">
               <div>
                 <h3 className="mb-4 text-lg font-semibold text-slate-800">
-                  AI Suggested Fixes(Coming Soon)
+                  AI Suggested Fixes:
                 </h3>
                 <ul className="space-y-3 text-slate-600">
                   {data.fixes.map((fix, idx) => (
@@ -402,7 +402,7 @@ const Results = () => {
           <section className="mt-10 pdf-section">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold text-slate-900">
-                AI Detected Issues(Coming Soon)
+                AI Detected Issues:
               </h3>
               <span className="text-sm text-slate-500">
                 {data.bugs.length} issues found
