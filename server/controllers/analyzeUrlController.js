@@ -706,6 +706,37 @@ export const analyzeUrlStream = async (req, res) => {
         }
       });
 
+      // Collect console errors and warnings
+      const consoleErrors = [];
+      const consoleWarnings = [];
+      page.on("console", (msg) => {
+        const msgType = msg.type();
+        if (msgType === "error") {
+          consoleErrors.push({
+            text: msg.text(),
+            location: msg.location()
+          });
+        } else if (msgType === "warning") {
+          consoleWarnings.push({
+            text: msg.text(),
+            location: msg.location()
+          });
+        }
+      });
+
+      // Collect network errors
+      const networkErrors = [];
+      page.on("response", (response) => {
+        const status = response.status();
+        if (status >= 400) {
+          networkErrors.push({
+            url: response.url(),
+            status,
+            statusText: response.statusText()
+          });
+        }
+      });
+
       sendSSE(res, 'status', { message: 'Navigating to page...' });
       console.log(`🔍 Navigating to: ${url}`);
       
@@ -750,6 +781,19 @@ export const analyzeUrlStream = async (req, res) => {
       };
       
       sendSSE(res, 'body', { bodyAnalysis: bodyAnalysisWithTests });
+
+      // Collect and send console errors and warnings
+      sendSSE(res, 'status', { message: 'Collecting console errors and warnings...' });
+      const consoleData = {
+        errors: consoleErrors,
+        warnings: consoleWarnings
+      };
+      sendSSE(res, 'console', { consoleData });
+
+      // Send network errors
+      sendSSE(res, 'status', { message: 'Collecting network errors...' });
+      sendSSE(res, 'network', { networkErrors });
+
       sendSSE(res, 'complete', { url });
 
       await browser.close();

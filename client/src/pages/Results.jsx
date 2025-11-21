@@ -25,6 +25,10 @@ const Results = () => {
   const [domStatus, setDomStatus] = useState('');
   const [headLoading, setHeadLoading] = useState(false);
   const [bodyLoading, setBodyLoading] = useState(false);
+  const [consoleData, setConsoleData] = useState(null);
+  const [consoleLoading, setConsoleLoading] = useState(false);
+  const [networkErrors, setNetworkErrors] = useState(null);
+  const [networkLoading, setNetworkLoading] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [editedUrl, setEditedUrl] = useState('');
@@ -93,7 +97,11 @@ const Results = () => {
     setDomStatus('');
     setHeadLoading(true);
     setBodyLoading(true);
+    setConsoleLoading(true);
+    setNetworkLoading(true);
     setDomAnalysis(null);
+    setConsoleData(null);
+    setNetworkErrors(null);
 
     // Use fetch-based streaming for progressive loading (supports custom headers for ngrok)
     const abortStream = analyzeUrlStream(url, ({ type, data }) => {
@@ -120,6 +128,16 @@ const Results = () => {
           }));
           break;
         
+        case 'console':
+          setConsoleLoading(false);
+          setConsoleData(data.consoleData || { errors: [], warnings: [] });
+          break;
+        
+        case 'network':
+          setNetworkLoading(false);
+          setNetworkErrors(data.networkErrors || []);
+          break;
+        
         case 'complete':
           setDomLoading(false);
           setDomStatus('');
@@ -129,6 +147,8 @@ const Results = () => {
           setDomLoading(false);
           setHeadLoading(false);
           setBodyLoading(false);
+          setConsoleLoading(false);
+          setNetworkLoading(false);
           setDomStatus('');
           const errorMsg = data.error || 'Unknown error';
           const details = data.details ? `: ${data.details}` : '';
@@ -851,6 +871,151 @@ const Results = () => {
                 </div>
               </div>
             )}
+
+            {/* Console Errors & Warnings Section */}
+            <div className="card p-6 pdf-section mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-xl font-semibold text-slate-800">
+                  Console Errors & Warnings
+                </h4>
+                {consoleLoading && (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+                    <span>Collecting...</span>
+                  </div>
+                )}
+              </div>
+
+              {consoleLoading && !consoleData ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600 mb-4" />
+                  <p className="text-slate-600">Collecting console errors and warnings...</p>
+                </div>
+              ) : consoleData ? (
+                <>
+                  {/* Console Errors */}
+                  {consoleData.errors && consoleData.errors.length > 0 ? (
+                    <div className="mb-6">
+                      <h5 className="text-lg font-medium text-slate-700 mb-3">
+                        Errors ({consoleData.errors.length})
+                      </h5>
+                      <div className="space-y-3">
+                        {consoleData.errors.map((error, idx) => (
+                          <div key={idx} className="rounded-lg border border-rose-200 bg-rose-50 p-4">
+                            <div className="flex items-start gap-3">
+                              <span className="text-rose-600 font-semibold text-sm flex-shrink-0">Error:</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-slate-700 text-sm font-medium break-words">{error.text || 'Unknown error'}</p>
+                                {error.location && (
+                                  <p className="text-slate-500 text-xs mt-1 break-all">
+                                    {error.location.url || 'unknown'}:{error.location.lineNumber || '-'}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mb-6">
+                      <h5 className="text-lg font-medium text-slate-700 mb-3">Errors</h5>
+                      <p className="text-slate-500 text-sm">No console errors found</p>
+                    </div>
+                  )}
+
+                  {/* Console Warnings */}
+                  {consoleData.warnings && consoleData.warnings.length > 0 ? (
+                    <div>
+                      <h5 className="text-lg font-medium text-slate-700 mb-3">
+                        Warnings ({consoleData.warnings.length})
+                      </h5>
+                      <div className="space-y-3">
+                        {consoleData.warnings.map((warning, idx) => (
+                          <div key={idx} className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                            <div className="flex items-start gap-3">
+                              <span className="text-amber-600 font-semibold text-sm flex-shrink-0">Warning:</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-slate-700 text-sm font-medium break-words">{warning.text || 'Unknown warning'}</p>
+                                {warning.location && (
+                                  <p className="text-slate-500 text-xs mt-1 break-all">
+                                    {warning.location.url || 'unknown'}:{warning.location.lineNumber || '-'}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <h5 className="text-lg font-medium text-slate-700 mb-3">Warnings</h5>
+                      <p className="text-slate-500 text-sm">No console warnings found</p>
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+
+            {/* Network Errors Section */}
+            <div className="card p-6 pdf-section mt-8">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-xl font-semibold text-slate-800">
+                  Network Errors
+                </h4>
+                {networkLoading && (
+                  <div className="flex items-center gap-2 text-sm text-slate-500">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+                    <span>Collecting...</span>
+                  </div>
+                )}
+              </div>
+
+              {networkLoading && !networkErrors ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600 mb-4" />
+                  <p className="text-slate-600">Collecting network errors...</p>
+                </div>
+              ) : networkErrors && networkErrors.length > 0 ? (
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left py-3 px-4 text-slate-700 font-medium">URL</th>
+                        <th className="text-left py-3 px-4 text-slate-700 font-medium">Status</th>
+                        <th className="text-left py-3 px-4 text-slate-700 font-medium">Status Text</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {networkErrors.map((error, idx) => (
+                        <tr key={idx} className="border-b border-slate-100 hover:bg-slate-50">
+                          <td className="py-3 px-4 text-slate-600 break-all max-w-md">
+                            {error.url || '-'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                              error.status >= 500
+                                ? 'bg-rose-100 text-rose-700'
+                                : error.status >= 400
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {error.status || '-'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-slate-600">
+                            {error.statusText || '-'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : networkErrors && networkErrors.length === 0 ? (
+                <p className="text-slate-500 text-sm">No network errors found</p>
+              ) : null}
+            </div>
           </section>
         </>
       )}
