@@ -99,16 +99,24 @@ This document captures the current architecture, data flow, and operational cons
 **Frontend**
 - `npm install` inside `client/`
 - Node 18+ recommended (Vite 5).
-- No env vars required by default.
+- Environment variables (optional):
+  - `VITE_API_BASE_URL`: API server URL for production builds
+    - Development: Leave unset to use Vite proxy (`http://localhost:5050`)
+    - Production: Set to your API server URL (e.g., `http://0.0.0.0:5050` or `https://api.example.com`)
+  - `VITE_PROXY_TARGET`: Override proxy target in development (defaults to `http://localhost:5050`)
 
 **Backend**
 - `npm install` inside `server/`
 - `.env` template:
   ```
   PORT=5050
+  CLIENT_ORIGIN=http://localhost:5173
   GROQ_API_KEY=sk_your_groq_key
   GROQ_MODEL=openai/gpt-oss-20b
   ```
+- Environment variables:
+  - `PORT`: Server port (default: 5050)
+  - `CLIENT_ORIGIN`: Client URL for CORS (default: `http://localhost:5173`)
 - Requires local Playwright dependencies (`npx playwright install chromium`).
 - No local model runtime required.
 
@@ -146,7 +154,8 @@ This document captures the current architecture, data flow, and operational cons
 
 - **Frontend**:
   - Static hosting (Vercel, Netlify, S3/CloudFront, etc.) or integrated with backend.
-  - Update proxy / base API URL for production (e.g., set Vite’s `VITE_API_BASE_URL` if needed and adjust Axios).
+  - Set `VITE_API_BASE_URL` environment variable to your production API URL (e.g., `https://api.example.com`).
+  - The client will use this URL directly instead of the Vite proxy.
 
 - **Observability**:
   - Add structured logging for Playwright events and LLM responses for debugging.
@@ -169,7 +178,7 @@ This document captures the current architecture, data flow, and operational cons
 
 | Component | Location | Notes |
 |-----------|----------|-------|
-| Vite config / proxy | `client/vite.config.js` | `/api` → `http://localhost:5050` |
+| Vite config / proxy | `client/vite.config.js` | `/api` → `VITE_PROXY_TARGET` or `http://localhost:5050` |
 | Router + pages | `client/src/App.jsx`, `client/src/pages/*` | Home & Results pages |
 | Axios wrapper | `client/src/services/api.js` | `scanWebsite(url)` |
 | Express server | `server/index.js` | CORS, routes, health |

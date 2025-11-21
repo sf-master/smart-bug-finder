@@ -9,11 +9,18 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5050;
 
+// Parse CLIENT_ORIGIN to support single origin or comma-separated origins
+// Examples: "http://localhost:5173" or "http://localhost:5173,https://example.com"
+const CLIENT_ORIGIN_RAW = process.env.CLIENT_ORIGIN || "http://localhost:5173";
+const CLIENT_ORIGIN = CLIENT_ORIGIN_RAW.includes(',')
+  ? CLIENT_ORIGIN_RAW.split(',').map(origin => origin.trim()).filter(origin => origin)
+  : CLIENT_ORIGIN_RAW.trim();
+
 app.use(
     cors({
-      origin: "http://localhost:5173",
+      origin: CLIENT_ORIGIN,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"]
+      allowedHeaders: ["Content-Type", "Authorization", "ngrok-skip-browser-warning"]
     })
   );
   

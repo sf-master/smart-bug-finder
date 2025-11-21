@@ -7,7 +7,8 @@ export default defineConfig({
     host: "0.0.0.0",
     proxy: {
       "/api": {
-        target: "http://localhost:5050",
+        // Use VITE_PROXY_TARGET for dev proxy, fallback to default localhost
+        target: process.env.VITE_PROXY_TARGET || process.env.VITE_API_BASE_URL || "http://localhost:5050",
         changeOrigin: true,
         secure: false
       }
