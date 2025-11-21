@@ -337,7 +337,7 @@ const Results = () => {
       )}
 
       {loading ? (
-        <SkeletonLoader />
+        <><Loader /><SkeletonLoader /></>
       ) : (
         <>
           <section className="grid gap-8 lg:grid-cols-2 pdf-section">
