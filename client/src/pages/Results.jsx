@@ -32,32 +32,7 @@ const Results = () => {
 
   const fallbackData = useMemo(
     () => ({
-      screenshot: 'https://placehold.co/800x450?text=Screenshot+Preview',
-      bugs: [
-        {
-          id: 1,
-          title: 'Lorem ipsum dolor sit amet',
-          description: 'Consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation.',
-          severity: 'High'
-        },
-        {
-          id: 2,
-          title: 'Sed ut perspiciatis unde omnis',
-          description: 'Iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi.',
-          severity: 'Medium'
-        },
-        {
-          id: 3,
-          title: 'Nemo enim ipsam voluptatem',
-          description: 'Quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt.',
-          severity: 'Low'
-        }
-      ],
-      fixes: [
-        'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-        'Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.',
-        'Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.'
-      ]
+      screenshot: 'https://placehold.co/800x450?text=Screenshot+Preview'
     }),
     []
   );
@@ -76,12 +51,16 @@ const Results = () => {
         const payload = response?.data || {};
         setData({
           screenshot: payload.screenshot ?? fallbackData.screenshot,
-          bugs: payload.bugs?.length ? payload.bugs : fallbackData.bugs,
-          fixes: payload.fixes?.length ? payload.fixes : fallbackData.fixes
+          bugs: payload.bugs || [],
+          fixes: payload.fixes || []
         });
       } catch (err) {
-        setError('Unable to scan website. Showing sample results.');
-        setData(fallbackData);
+        setError('Unable to scan website.');
+        setData({
+          screenshot: fallbackData.screenshot,
+          bugs: [],
+          fixes: []
+        });
       } finally {
         setLoading(false);
       }
@@ -351,16 +330,16 @@ const Results = () => {
         </div>
       </section>
 
+      {error && !loading && (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-amber-900 shadow-sm">
+          {error}
+        </div>
+      )}
+
       {loading ? (
         <SkeletonLoader />
       ) : (
         <>
-          {error && (
-            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-amber-900 shadow-sm">
-              {error}
-            </div>
-          )}
-
           <section className="grid gap-8 lg:grid-cols-2 pdf-section">
             <div className="card p-6">
               <h3 className="mb-4 text-lg font-semibold text-slate-800">
@@ -380,14 +359,20 @@ const Results = () => {
                 <h3 className="mb-4 text-lg font-semibold text-slate-800">
                   AI Suggested Fixes:
                 </h3>
-                <ul className="space-y-3 text-slate-600">
-                  {data.fixes.map((fix, idx) => (
-                    <li key={idx} className="flex gap-3">
-                      <span className="text-indigo-600 font-semibold">{idx + 1}.</span>
-                      <span>{fix}</span>
-                    </li>
-                  ))}
-                </ul>
+                {data.fixes.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <p className="text-slate-500 text-lg">No AI Suggested Fixes</p>
+                  </div>
+                ) : (
+                  <ul className="space-y-3 text-slate-600">
+                    {data.fixes.map((fix, idx) => (
+                      <li key={idx} className="flex gap-3">
+                        <span className="text-indigo-600 font-semibold">{idx + 1}.</span>
+                        <span>{fix}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <button
                 onClick={handleDownload}
@@ -404,15 +389,23 @@ const Results = () => {
               <h3 className="text-xl font-semibold text-slate-900">
                 AI Detected Issues:
               </h3>
-              <span className="text-sm text-slate-500">
-                {data.bugs.length} issues found
-              </span>
+              {data.bugs.length > 0 && (
+                <span className="text-sm text-slate-500">
+                  {data.bugs.length} issues found
+                </span>
+              )}
             </div>
-            <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-              {data.bugs.map((bug) => (
-                <BugCard key={bug.id ?? bug.title} bug={bug} />
-              ))}
-            </div>
+            {data.bugs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <p className="text-slate-500 text-lg">No AI Detected Issues</p>
+              </div>
+            ) : (
+              <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                {data.bugs.map((bug) => (
+                  <BugCard key={bug.id ?? bug.title} bug={bug} />
+                ))}
+              </div>
+            )}
           </section>
 
           {/* DOM Analysis Section */}
