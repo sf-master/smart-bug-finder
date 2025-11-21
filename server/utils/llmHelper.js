@@ -1,14 +1,7 @@
+import { openai } from "./openaiClient.js";
 import dotenv from "dotenv";
 import axios from "axios";
-
-dotenv.config();
-
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.1";
-
-const ollamaClient = axios.create({
-  baseURL: OLLAMA_BASE_URL
-});
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Default to a common OpenAI model
 
 const truncate = (text = "", max = 18000) =>
   text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
@@ -20,12 +13,20 @@ export const analyzeScanData = async ({
   networkErrors = [],
   screenshot
 }) => {
-  if (!OLLAMA_MODEL) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       bugs: [],
       fixes: [],
       suggestions: [],
-      rawLLMResponse: { error: "Missing OLLAMA_MODEL" }
+      rawLLMResponse: { error: "Missing OPENAI_API_KEY" }
+    };
+  }
+  if (!OPENAI_MODEL) {
+    return {
+      bugs: [],
+      fixes: [],
+      suggestions: [],
+      rawLLMResponse: { error: "Missing OPENAI_MODEL" }
     };
   }
 
@@ -51,17 +52,34 @@ export const analyzeScanData = async ({
           .join("\n")
       : "None";
 
-  const prompt = `
+  const systemMessage = `
 You are Smart Bug Finder, an AI for UI bug detection and accessibility analysis.
+Your task is to analyze the provided scan data (URL, DOM, console errors, network errors, and screenshot information) and identify potential UI bugs, provide fixes, and suggest improvements.
 
-Return valid JSON ONLY:
+Return your response in valid JSON ONLY, strictly adhering to the following schema:
 
 {
-  "bugs": [{ "title": "", "description": "", "severity": "" }],
-  "fixes": ["string"],
-  "suggestions": ["string"]
+  "bugs": [
+    {
+      "title": "Concise bug title",
+      "description": "Detailed description of the bug, including its impact.",
+      "severity": "low | medium | high | critical"
+    }
+  ],
+  "fixes": [
+    "Suggested fix 1 for identified bugs or issues.",
+    "Suggested fix 2."
+  ],
+  "suggestions": [
+    "General suggestion 1 for UI/UX or accessibility improvement.",
+    "General suggestion 2."
+  ]
 }
 
+Ensure all fields are populated even if with "N/A" or "None" if no relevant information is found.
+`;
+
+  const userMessage = `
 Scan Data:
 URL: ${url}
 
@@ -78,21 +96,23 @@ Screenshot length: ${screenshot?.length || 0}
 `;
 
   try {
-    const response = await ollamaClient.post("/api/generate", {
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      options: {
-        temperature: 0.2
-      }
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: systemMessage },
+        { role: "user", content: userMessage }
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" } // Ensure JSON output
     });
 
-    const jsonText = response.data?.response ?? "{}";
+    const jsonText = response.choices[0]?.message?.content ?? "{}";
 
     let parsed;
     try {
       parsed = JSON.parse(jsonText);
-    } catch {
+    } catch (e) {
+      console.error("Failed to parse LLM response as JSON:", e);
       parsed = {};
     }
 
@@ -103,14 +123,14 @@ Screenshot length: ${screenshot?.length || 0}
       rawLLMResponse: parsed
     };
   } catch (error) {
-    console.error("Ollama request failed:", error.message);
+    console.error("OpenAI request failed:", error.message);
     return {
       bugs: [],
       fixes: [],
       suggestions: [],
       rawLLMResponse: {
         error: error.message,
-        details: error.response?.data || null
+        details: error.response?.data || null // For axios errors
       }
     };
   }
