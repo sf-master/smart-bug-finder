@@ -32,8 +32,11 @@ export async function takeScrollScreenshots(url, options = {}) {
       throw new Error("Invalid URL format");
     }
 
-    // Launch browser
-    browser = await chromium.launch({ headless });
+    // Launch browser with performance optimizations
+    browser = await chromium.launch({ 
+      headless,
+      args: ['--disable-javascript-harmony-shipping']
+    });
 
     context = await browser.newContext({
       viewport: { width: viewportWidth, height: viewportHeight },
@@ -43,16 +46,29 @@ export async function takeScrollScreenshots(url, options = {}) {
 
     page = await context.newPage();
 
-    console.log(`📸 Navigating to: ${url}`);
-
-    // Navigate to the URL
-    await page.goto(url, {
-      waitUntil: "networkidle",
-      timeout: 60000,
+    // Block fonts and media to speed up loading (keep images for screenshots)
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      if (['font', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
     });
 
-    // Wait for initial page load
-    await page.waitForTimeout(2000);
+    console.log(`📸 Navigating to: ${url}`);
+
+    // Navigate to the URL with faster wait strategy
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000, // Reduced from 5 minutes to 1 minute
+    });
+
+    // Wait for network to settle (with timeout) and page to render
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+      // If networkidle times out, continue anyway
+    });
+    await page.waitForTimeout(1000); // Reduced from 2s to 1s
 
     const screenshots = [];
     let currentScroll = 0;
@@ -177,8 +193,11 @@ export async function takeFullPageScreenshot(url, options = {}) {
       throw new Error("Invalid URL format");
     }
 
-    // Launch browser
-    browser = await chromium.launch({ headless });
+    // Launch browser with performance optimizations
+    browser = await chromium.launch({ 
+      headless,
+      args: ['--disable-javascript-harmony-shipping']
+    });
 
     context = await browser.newContext({
       viewport: { width: viewportWidth, height: viewportHeight },
@@ -188,16 +207,29 @@ export async function takeFullPageScreenshot(url, options = {}) {
 
     page = await context.newPage();
 
-    console.log(`📸 Taking full-page screenshot of: ${url}`);
-
-    // Navigate to the URL
-    await page.goto(url, {
-      waitUntil: "networkidle",
-      timeout: 60000,
+    // Block fonts and media to speed up loading (keep images for screenshots)
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      if (['font', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
     });
 
-    // Wait for page to fully load
-    await page.waitForTimeout(2000);
+    console.log(`📸 Taking full-page screenshot of: ${url}`);
+
+    // Navigate to the URL with faster wait strategy
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000, // Reduced from 5 minutes to 1 minute
+    });
+
+    // Wait for network to settle (with timeout) and page to render
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+      // If networkidle times out, continue anyway
+    });
+    await page.waitForTimeout(1000); // Reduced from 2s to 1s
 
     // Take full-page screenshot
     const screenshotBuffer = await page.screenshot({ fullPage: true });

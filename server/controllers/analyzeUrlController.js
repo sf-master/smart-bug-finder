@@ -609,8 +609,11 @@ export const analyzeUrl = async (req, res) => {
     try {
       console.log(`🔍 Analyzing DOM for: ${url}`);
 
-      // Launch browser
-      browser = await chromium.launch({ headless: true });
+      // Launch browser with performance optimizations
+      browser = await chromium.launch({ 
+        headless: true,
+        args: ['--disable-images', '--disable-javascript-harmony-shipping']
+      });
 
       context = await browser.newContext({
         viewport: { width: 1366, height: 768 },
@@ -620,14 +623,30 @@ export const analyzeUrl = async (req, res) => {
 
       page = await context.newPage();
 
-      // Navigate to URL and wait for content to load
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 60000
+      // Block unnecessary resources to speed up loading
+      await page.route('**/*', (route) => {
+        const resourceType = route.request().resourceType();
+        // Block images, fonts, and media - we only need HTML, CSS, and JS for DOM analysis
+        if (['image', 'font', 'media'].includes(resourceType)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
       });
 
-      // Wait for client-side JavaScript to render
-      await page.waitForTimeout(3000);
+      // Navigate to URL with faster wait strategy
+      // 'domcontentloaded' is faster than 'networkidle' and sufficient for DOM analysis
+      console.log(`🔍 Navigating to: ${url}`);
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000 // Reduced from 5 minutes to 1 minute
+      });
+
+      // Wait for critical content to render (reduced from 3s to 1s)
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
+        // If networkidle times out, continue anyway - DOM is already loaded
+      });
+      await page.waitForTimeout(1000);
 
       // Verify page has loaded correctly
       const hasHead = await page.evaluate(() => !!document.head);

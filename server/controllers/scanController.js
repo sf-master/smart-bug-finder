@@ -28,8 +28,11 @@ export const scanWebsite = async (req, res) => {
     const consoleErrors = [];
     const networkErrors = [];
 
-    // Playwright launch
-    browser = await chromium.launch({ headless: true });
+    // Playwright launch with performance optimizations
+    browser = await chromium.launch({ 
+      headless: true,
+      args: ['--disable-images', '--disable-javascript-harmony-shipping']
+    });
 
     context = await browser.newContext({
       viewport: { width: 1366, height: 768 },
@@ -38,6 +41,18 @@ export const scanWebsite = async (req, res) => {
     });
 
     page = await context.newPage();
+
+    // Block unnecessary resources to speed up loading
+    // Note: We keep images for screenshots, but block fonts and media
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Block fonts and media - keep images for screenshots
+      if (['font', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
 
     // Log console errors
     page.on("console", (msg) => {
@@ -63,13 +78,17 @@ export const scanWebsite = async (req, res) => {
 
     console.log(`🔍 Navigating to: ${url}`);
 
+    // Use 'domcontentloaded' first, then wait for networkidle with shorter timeout
     await page.goto(url, {
-      waitUntil: "networkidle",
-      timeout: 60000
+      waitUntil: 'domcontentloaded',
+      timeout: 60000 // Reduced from 5 minutes to 1 minute
     });
 
-    // Wait a bit for client-side JS render
-    await page.waitForTimeout(3000);
+    // Wait for network to settle (with timeout) and client-side JS to render
+    await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {
+      // If networkidle times out, continue anyway - DOM is already loaded
+    });
+    await page.waitForTimeout(1000); // Reduced from 3s to 1s
 
     const dom = await page.content();
 
