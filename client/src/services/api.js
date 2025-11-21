@@ -28,15 +28,14 @@ export const analyzeUrl = (url) =>
   apiClient.get(`/api/analyze-url?url=${encodeURIComponent(url)}`);
 
 /**
- * Creates an EventSource for streaming DOM analysis with progressive loading
+ * Creates a fetch-based stream for DOM analysis with progressive loading
+ * Uses fetch instead of EventSource to support custom headers (needed for ngrok)
  * @param {string} url - The URL to analyze
  * @param {Function} onMessage - Callback for each message received
- * @returns {EventSource} The EventSource instance
+ * @returns {Function} Abort function to cancel the stream
  */
 export const analyzeUrlStream = (url, onMessage) => {
-  // For EventSource, we need to handle the base URL properly
-  // If API_BASE_URL is empty, use relative path (works with Vite proxy)
-  // Otherwise, use the full URL
+  // Build the stream URL
   let streamUrl;
   if (API_BASE_URL) {
     streamUrl = `${API_BASE_URL}/api/analyze-url-stream?url=${encodeURIComponent(url)}`;
@@ -44,71 +43,98 @@ export const analyzeUrlStream = (url, onMessage) => {
     // Relative path - Vite proxy will handle it
     streamUrl = `/api/analyze-url-stream?url=${encodeURIComponent(url)}`;
   }
+
+  const abortController = new AbortController();
   
-  const eventSource = new EventSource(streamUrl);
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'message', event: 'default', data });
-    } catch (error) {
-      console.error('Error parsing SSE message:', error);
-    }
+  // Use fetch with ReadableStream to support custom headers
+  fetch(streamUrl, {
+    method: 'GET',
+    headers: {
+      'ngrok-skip-browser-warning': 'true',
+      'Accept': 'text/event-stream'
+    },
+    signal: abortController.signal
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        let currentEvent = 'message';
+        let currentData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            currentData = line.substring(6).trim();
+          } else if (line === '') {
+            // Empty line indicates end of message
+            if (currentData) {
+              try {
+                const data = JSON.parse(currentData);
+                onMessage({ type: currentEvent, data });
+              } catch (error) {
+                console.error(`Error parsing ${currentEvent} event:`, error);
+              }
+            }
+            currentEvent = 'message';
+            currentData = '';
+          }
+        }
+      }
+
+      // Handle any remaining data in buffer
+      if (buffer.trim()) {
+        const lines = buffer.split('\n');
+        let currentEvent = 'message';
+        let currentData = '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim();
+          } else if (line.startsWith('data: ')) {
+            currentData = line.substring(6).trim();
+          } else if (line === '' && currentData) {
+            try {
+              const data = JSON.parse(currentData);
+              onMessage({ type: currentEvent, data });
+            } catch (error) {
+              console.error(`Error parsing ${currentEvent} event:`, error);
+            }
+            currentEvent = 'message';
+            currentData = '';
+          }
+        }
+      }
+    })
+    .catch((error) => {
+      if (error.name === 'AbortError') {
+        console.log('Stream aborted');
+        return;
+      }
+      console.error('Stream error:', error);
+      onMessage({ type: 'error', data: { error: error.message || 'Connection error' } });
+    });
+
+  // Return abort function
+  return () => {
+    abortController.abort();
   };
-  
-  // Handle custom events (head, body, status, error, complete)
-  eventSource.addEventListener('head', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'head', data });
-    } catch (error) {
-      console.error('Error parsing head event:', error);
-    }
-  });
-  
-  eventSource.addEventListener('body', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'body', data });
-    } catch (error) {
-      console.error('Error parsing body event:', error);
-    }
-  });
-  
-  eventSource.addEventListener('status', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'status', data });
-    } catch (error) {
-      console.error('Error parsing status event:', error);
-    }
-  });
-  
-  eventSource.addEventListener('error', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'error', data });
-    } catch (error) {
-      console.error('Error parsing error event:', error);
-    }
-  });
-  
-  eventSource.addEventListener('complete', (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      onMessage({ type: 'complete', data });
-      eventSource.close();
-    } catch (error) {
-      console.error('Error parsing complete event:', error);
-    }
-  });
-  
-  eventSource.onerror = (error) => {
-    console.error('EventSource error:', error);
-    onMessage({ type: 'error', data: { error: 'Connection error' } });
-    eventSource.close();
-  };
-  
-  return eventSource;
 };
 

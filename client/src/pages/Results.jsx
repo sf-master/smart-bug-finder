@@ -115,8 +115,8 @@ const Results = () => {
     setBodyLoading(true);
     setDomAnalysis(null);
 
-    // Use EventSource for streaming/progressive loading
-    const eventSource = analyzeUrlStream(url, ({ type, data }) => {
+    // Use fetch-based streaming for progressive loading (supports custom headers for ngrok)
+    const abortStream = analyzeUrlStream(url, ({ type, data }) => {
       switch (type) {
         case 'status':
           setDomStatus(data.message || '');
@@ -163,8 +163,8 @@ const Results = () => {
 
     // Cleanup on unmount or URL change
     return () => {
-      if (eventSource) {
-        eventSource.close();
+      if (abortStream) {
+        abortStream();
       }
     };
   }, [url]);
