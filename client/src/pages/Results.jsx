@@ -1,8 +1,8 @@
 import Loader from '../components/Loader';
 import BugCard from '../components/BugCard';
-import { scanWebsite, analyzeUrl } from '../services/api';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { scanWebsite, analyzeUrl, analyzeUrlStream } from '../services/api';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import SkeletonLoader from '../components/SkeletonLoader'; // Import SkeletonLoader
