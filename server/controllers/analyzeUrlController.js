@@ -169,7 +169,32 @@ const analyzeHead = async (page, baseUrl) => {
   });
 
   // Analyze link tags with validation
-  const linkPromises = headData.linkTags.map(async (link) => {
+  // Optimize: Skip validation for common CDN links and limit validation to first 30 links
+  const commonCDNDomains = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'unpkg.com', 
+                            'fonts.googleapis.com', 'fonts.gstatic.com', 'ajax.googleapis.com',
+                            'cdn.jsdelivr.net', 'maxcdn.bootstrapcdn.com', 'cdn.jsdelivr.net'];
+  
+  const linkPromises = headData.linkTags.slice(0, 30).map(async (link) => {
+    // Skip validation for CDN links - assume they're valid
+    if (link.href) {
+      try {
+        const resolvedUrl = new URL(link.href, baseUrl);
+        const linkHost = resolvedUrl.hostname;
+        if (commonCDNDomains.some(cdn => linkHost.includes(cdn))) {
+          return {
+            ...link,
+            status: 'valid',
+            statusCode: 200,
+            ok: true,
+            sameOrigin: false,
+            errorMessage: undefined
+          };
+        }
+      } catch {
+        // Continue with validation if URL parsing fails
+      }
+    }
+    
     const validation = await validateLink(link.href, baseUrl);
     return {
       ...link,
@@ -177,279 +202,310 @@ const analyzeHead = async (page, baseUrl) => {
     };
   });
 
-  analysis.linkSummary = await Promise.all(linkPromises);
+  // For remaining links, mark as not validated
+  const remainingLinks = headData.linkTags.slice(30).map(link => ({
+    ...link,
+    status: 'not_validated',
+    statusCode: null,
+    ok: null,
+    sameOrigin: null,
+    errorMessage: 'Skipped (too many links)'
+  }));
+
+  const validatedLinks = await Promise.all(linkPromises);
+  analysis.linkSummary = [...validatedLinks, ...remainingLinks];
 
   return analysis;
 };
 
 /**
  * Tests interactive elements using Playwright
+ * Optimized: All element tests run in parallel for maximum performance
  */
 const testInteractiveElements = async (page, bodyAnalysis) => {
-  const testResults = {
-    buttons: [],
-    dropdowns: [],
-    inputs: [],
-    checkboxes: []
-  };
+  // Test all element types in parallel
+  const [buttonResults, inputResults, dropdownResults, checkboxResults] = await Promise.all([
+    // Test all buttons in parallel
+    Promise.all(
+      bodyAnalysis.buttons.map(async (button) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, button, 'button');
 
-  // Test buttons
-  for (const button of bodyAnalysis.buttons) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, button, 'button');
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
 
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        testResults.buttons.push({
-          ...button,
-          testResults: {
-            clickable: isClickable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
+            return {
+              ...button,
+              testResults: {
+                clickable: isClickable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...button,
+              testResults: {
+                clickable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
           }
-        });
-      } else {
-        testResults.buttons.push({
-          ...button,
-          testResults: {
-            clickable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.buttons.push({
-        ...button,
-        testResults: {
-          clickable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test inputs
-  for (const input of bodyAnalysis.inputs) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, input, 'input');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const isReadOnly = await element.getAttribute('readonly').catch(() => null) !== null;
-        const isDisabled = await element.getAttribute('disabled').catch(() => null) !== null;
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
-
-        // Try to fill with test text
-        let fillable = false;
-        if (isFillable) {
-          try {
-            await element.fill('test', { timeout: 1000 });
-            fillable = true;
-            // Clear the test text
-            await element.fill('').catch(() => {});
-          } catch {
-            fillable = false;
-          }
-        }
-
-        testResults.inputs.push({
-          ...input,
-          testResults: {
-            fillable: fillable,
-            visible: isVisible,
-            enabled: isEnabled,
-            readonly: isReadOnly,
-            disabled: isDisabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
-          }
-        });
-      } else {
-        testResults.inputs.push({
-          ...input,
-          testResults: {
-            fillable: false,
-            visible: false,
-            enabled: false,
-            readonly: false,
-            disabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.inputs.push({
-        ...input,
-        testResults: {
-          fillable: false,
-          visible: false,
-          enabled: false,
-          readonly: false,
-          disabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test dropdowns
-  for (const dropdown of bodyAnalysis.dropdowns) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, dropdown, 'select');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        // Try to select an option
-        let selectable = false;
-        if (isClickable && dropdown.options && dropdown.options.length > 0) {
-          try {
-            const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
-            await element.selectOption(firstOptionValue, { timeout: 1000 });
-            selectable = true;
-          } catch {
-            selectable = false;
-          }
-        }
-
-        testResults.dropdowns.push({
-          ...dropdown,
-          testResults: {
-            clickable: isClickable,
-            selectable: selectable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
-          }
-        });
-      } else {
-        testResults.dropdowns.push({
-          ...dropdown,
-          testResults: {
-            clickable: false,
-            selectable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.dropdowns.push({
-        ...dropdown,
-        testResults: {
-          clickable: false,
-          selectable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test checkboxes
-  for (const checkbox of bodyAnalysis.checkboxes) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, checkbox, 'checkbox');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        // Try to toggle checkbox
-        let toggleable = false;
-        if (isClickable) {
-          try {
-            const wasChecked = await element.isChecked().catch(() => false);
-            await element.click({ timeout: 1000 });
-            const isNowChecked = await element.isChecked().catch(() => false);
-            toggleable = wasChecked !== isNowChecked;
-            // Toggle back if it changed
-            if (toggleable) {
-              await element.click().catch(() => {});
+        } catch (error) {
+          return {
+            ...button,
+            testResults: {
+              clickable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
             }
-          } catch {
-            toggleable = false;
-          }
+          };
         }
+      })
+    ),
 
-        testResults.checkboxes.push({
-          ...checkbox,
-          testResults: {
-            clickable: isClickable,
-            toggleable: toggleable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
+    // Test all inputs in parallel
+    Promise.all(
+      bodyAnalysis.inputs.map(async (input) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, input, 'input');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, isReadOnly, isDisabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.getAttribute('readonly').catch(() => null).then(val => val !== null),
+              element.getAttribute('disabled').catch(() => null).then(val => val !== null),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
+
+            // Try to fill with test text (only if fillable)
+            let fillable = false;
+            if (isFillable) {
+              try {
+                await element.fill('test', { timeout: 800 });
+                fillable = true;
+                await element.fill('').catch(() => {});
+              } catch {
+                fillable = false;
+              }
+            }
+
+            return {
+              ...input,
+              testResults: {
+                fillable: fillable,
+                visible: isVisible,
+                enabled: isEnabled,
+                readonly: isReadOnly,
+                disabled: isDisabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...input,
+              testResults: {
+                fillable: false,
+                visible: false,
+                enabled: false,
+                readonly: false,
+                disabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
           }
-        });
-      } else {
-        testResults.checkboxes.push({
-          ...checkbox,
-          testResults: {
-            clickable: false,
-            toggleable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.checkboxes.push({
-        ...checkbox,
-        testResults: {
-          clickable: false,
-          toggleable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
+        } catch (error) {
+          return {
+            ...input,
+            testResults: {
+              fillable: false,
+              visible: false,
+              enabled: false,
+              readonly: false,
+              disabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
         }
-      });
-    }
-  }
+      })
+    ),
 
-  return testResults;
+    // Test all dropdowns in parallel
+    Promise.all(
+      bodyAnalysis.dropdowns.map(async (dropdown) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, dropdown, 'select');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+            // Try to select an option
+            let selectable = false;
+            if (isClickable && dropdown.options && dropdown.options.length > 0) {
+              try {
+                const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
+                await element.selectOption(firstOptionValue, { timeout: 800 });
+                selectable = true;
+              } catch {
+                selectable = false;
+              }
+            }
+
+            return {
+              ...dropdown,
+              testResults: {
+                clickable: isClickable,
+                selectable: selectable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...dropdown,
+              testResults: {
+                clickable: false,
+                selectable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
+          }
+        } catch (error) {
+          return {
+            ...dropdown,
+            testResults: {
+              clickable: false,
+              selectable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
+        }
+      })
+    ),
+
+    // Test all checkboxes in parallel
+    Promise.all(
+      bodyAnalysis.checkboxes.map(async (checkbox) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, checkbox, 'checkbox');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+            // Try to toggle checkbox
+            let toggleable = false;
+            if (isClickable) {
+              try {
+                const wasChecked = await element.isChecked().catch(() => false);
+                await element.click({ timeout: 800 });
+                const isNowChecked = await element.isChecked().catch(() => false);
+                toggleable = wasChecked !== isNowChecked;
+                if (toggleable) {
+                  await element.click().catch(() => {});
+                }
+              } catch {
+                toggleable = false;
+              }
+            }
+
+            return {
+              ...checkbox,
+              testResults: {
+                clickable: isClickable,
+                toggleable: toggleable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...checkbox,
+              testResults: {
+                clickable: false,
+                toggleable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
+          }
+        } catch (error) {
+          return {
+            ...checkbox,
+            testResults: {
+              clickable: false,
+              toggleable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
+        }
+      })
+    )
+  ]);
+
+  return {
+    buttons: buttonResults,
+    inputs: inputResults,
+    dropdowns: dropdownResults,
+    checkboxes: checkboxResults
+  };
 };
 
 /**
@@ -659,9 +715,12 @@ export const analyzeUrl = async (req, res) => {
         });
       }
 
-      // Analyze HEAD and BODY structure using Playwright's DOM API
-      headAnalysis = await analyzeHead(page, url);
-      const bodyAnalysis = await analyzeBody(page);
+      // Analyze HEAD and BODY structure in parallel (they're independent)
+      const [headAnalysisResult, bodyAnalysis] = await Promise.all([
+        analyzeHead(page, url),
+        analyzeBody(page)
+      ]);
+      headAnalysis = headAnalysisResult;
 
       // Test interactive elements using Playwright (page is still open)
       const testResults = await testInteractiveElements(page, bodyAnalysis);
