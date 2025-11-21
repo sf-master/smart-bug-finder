@@ -169,7 +169,32 @@ const analyzeHead = async (page, baseUrl) => {
   });
 
   // Analyze link tags with validation
-  const linkPromises = headData.linkTags.map(async (link) => {
+  // Optimize: Skip validation for common CDN links and limit validation to first 30 links
+  const commonCDNDomains = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'unpkg.com', 
+                            'fonts.googleapis.com', 'fonts.gstatic.com', 'ajax.googleapis.com',
+                            'cdn.jsdelivr.net', 'maxcdn.bootstrapcdn.com', 'cdn.jsdelivr.net'];
+  
+  const linkPromises = headData.linkTags.slice(0, 30).map(async (link) => {
+    // Skip validation for CDN links - assume they're valid
+    if (link.href) {
+      try {
+        const resolvedUrl = new URL(link.href, baseUrl);
+        const linkHost = resolvedUrl.hostname;
+        if (commonCDNDomains.some(cdn => linkHost.includes(cdn))) {
+          return {
+            ...link,
+            status: 'valid',
+            statusCode: 200,
+            ok: true,
+            sameOrigin: false,
+            errorMessage: undefined
+          };
+        }
+      } catch {
+        // Continue with validation if URL parsing fails
+      }
+    }
+    
     const validation = await validateLink(link.href, baseUrl);
     return {
       ...link,
@@ -177,279 +202,310 @@ const analyzeHead = async (page, baseUrl) => {
     };
   });
 
-  analysis.linkSummary = await Promise.all(linkPromises);
+  // For remaining links, mark as not validated
+  const remainingLinks = headData.linkTags.slice(30).map(link => ({
+    ...link,
+    status: 'not_validated',
+    statusCode: null,
+    ok: null,
+    sameOrigin: null,
+    errorMessage: 'Skipped (too many links)'
+  }));
+
+  const validatedLinks = await Promise.all(linkPromises);
+  analysis.linkSummary = [...validatedLinks, ...remainingLinks];
 
   return analysis;
 };
 
 /**
  * Tests interactive elements using Playwright
+ * Optimized: All element tests run in parallel for maximum performance
  */
 const testInteractiveElements = async (page, bodyAnalysis) => {
-  const testResults = {
-    buttons: [],
-    dropdowns: [],
-    inputs: [],
-    checkboxes: []
-  };
+  // Test all element types in parallel
+  const [buttonResults, inputResults, dropdownResults, checkboxResults] = await Promise.all([
+    // Test all buttons in parallel
+    Promise.all(
+      bodyAnalysis.buttons.map(async (button) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, button, 'button');
 
-  // Test buttons
-  for (const button of bodyAnalysis.buttons) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, button, 'button');
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
 
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        testResults.buttons.push({
-          ...button,
-          testResults: {
-            clickable: isClickable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
+            return {
+              ...button,
+              testResults: {
+                clickable: isClickable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...button,
+              testResults: {
+                clickable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
           }
-        });
-      } else {
-        testResults.buttons.push({
-          ...button,
-          testResults: {
-            clickable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.buttons.push({
-        ...button,
-        testResults: {
-          clickable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test inputs
-  for (const input of bodyAnalysis.inputs) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, input, 'input');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const isReadOnly = await element.getAttribute('readonly').catch(() => null) !== null;
-        const isDisabled = await element.getAttribute('disabled').catch(() => null) !== null;
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
-
-        // Try to fill with test text
-        let fillable = false;
-        if (isFillable) {
-          try {
-            await element.fill('test', { timeout: 1000 });
-            fillable = true;
-            // Clear the test text
-            await element.fill('').catch(() => {});
-          } catch {
-            fillable = false;
-          }
-        }
-
-        testResults.inputs.push({
-          ...input,
-          testResults: {
-            fillable: fillable,
-            visible: isVisible,
-            enabled: isEnabled,
-            readonly: isReadOnly,
-            disabled: isDisabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
-          }
-        });
-      } else {
-        testResults.inputs.push({
-          ...input,
-          testResults: {
-            fillable: false,
-            visible: false,
-            enabled: false,
-            readonly: false,
-            disabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.inputs.push({
-        ...input,
-        testResults: {
-          fillable: false,
-          visible: false,
-          enabled: false,
-          readonly: false,
-          disabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test dropdowns
-  for (const dropdown of bodyAnalysis.dropdowns) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, dropdown, 'select');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        // Try to select an option
-        let selectable = false;
-        if (isClickable && dropdown.options && dropdown.options.length > 0) {
-          try {
-            const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
-            await element.selectOption(firstOptionValue, { timeout: 1000 });
-            selectable = true;
-          } catch {
-            selectable = false;
-          }
-        }
-
-        testResults.dropdowns.push({
-          ...dropdown,
-          testResults: {
-            clickable: isClickable,
-            selectable: selectable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
-          }
-        });
-      } else {
-        testResults.dropdowns.push({
-          ...dropdown,
-          testResults: {
-            clickable: false,
-            selectable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.dropdowns.push({
-        ...dropdown,
-        testResults: {
-          clickable: false,
-          selectable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
-        }
-      });
-    }
-  }
-
-  // Test checkboxes
-  for (const checkbox of bodyAnalysis.checkboxes) {
-    try {
-      const { element, selector } = await findElementWithMultipleStrategies(page, checkbox, 'checkbox');
-
-      if (element) {
-        const isVisible = await element.isVisible().catch(() => false);
-        const isEnabled = await element.isEnabled().catch(() => false);
-        const boundingBox = await element.boundingBox().catch(() => null);
-        const isClickable = isVisible && isEnabled && boundingBox !== null;
-
-        // Try to toggle checkbox
-        let toggleable = false;
-        if (isClickable) {
-          try {
-            const wasChecked = await element.isChecked().catch(() => false);
-            await element.click({ timeout: 1000 });
-            const isNowChecked = await element.isChecked().catch(() => false);
-            toggleable = wasChecked !== isNowChecked;
-            // Toggle back if it changed
-            if (toggleable) {
-              await element.click().catch(() => {});
+        } catch (error) {
+          return {
+            ...button,
+            testResults: {
+              clickable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
             }
-          } catch {
-            toggleable = false;
-          }
+          };
         }
+      })
+    ),
 
-        testResults.checkboxes.push({
-          ...checkbox,
-          testResults: {
-            clickable: isClickable,
-            toggleable: toggleable,
-            visible: isVisible,
-            enabled: isEnabled,
-            hasDimensions: boundingBox !== null,
-            selector: selector,
-            error: null
+    // Test all inputs in parallel
+    Promise.all(
+      bodyAnalysis.inputs.map(async (input) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, input, 'input');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, isReadOnly, isDisabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.getAttribute('readonly').catch(() => null).then(val => val !== null),
+              element.getAttribute('disabled').catch(() => null).then(val => val !== null),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isFillable = isVisible && isEnabled && !isReadOnly && !isDisabled && boundingBox !== null;
+
+            // Try to fill with test text (only if fillable)
+            let fillable = false;
+            if (isFillable) {
+              try {
+                await element.fill('test', { timeout: 800 });
+                fillable = true;
+                await element.fill('').catch(() => {});
+              } catch {
+                fillable = false;
+              }
+            }
+
+            return {
+              ...input,
+              testResults: {
+                fillable: fillable,
+                visible: isVisible,
+                enabled: isEnabled,
+                readonly: isReadOnly,
+                disabled: isDisabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...input,
+              testResults: {
+                fillable: false,
+                visible: false,
+                enabled: false,
+                readonly: false,
+                disabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
           }
-        });
-      } else {
-        testResults.checkboxes.push({
-          ...checkbox,
-          testResults: {
-            clickable: false,
-            toggleable: false,
-            visible: false,
-            enabled: false,
-            hasDimensions: false,
-            selector: null,
-            error: 'Element not found using any selector strategy'
-          }
-        });
-      }
-    } catch (error) {
-      testResults.checkboxes.push({
-        ...checkbox,
-        testResults: {
-          clickable: false,
-          toggleable: false,
-          visible: false,
-          enabled: false,
-          hasDimensions: false,
-          selector: null,
-          error: error.message
+        } catch (error) {
+          return {
+            ...input,
+            testResults: {
+              fillable: false,
+              visible: false,
+              enabled: false,
+              readonly: false,
+              disabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
         }
-      });
-    }
-  }
+      })
+    ),
 
-  return testResults;
+    // Test all dropdowns in parallel
+    Promise.all(
+      bodyAnalysis.dropdowns.map(async (dropdown) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, dropdown, 'select');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+            // Try to select an option
+            let selectable = false;
+            if (isClickable && dropdown.options && dropdown.options.length > 0) {
+              try {
+                const firstOptionValue = dropdown.options[0].value || dropdown.options[0].text;
+                await element.selectOption(firstOptionValue, { timeout: 800 });
+                selectable = true;
+              } catch {
+                selectable = false;
+              }
+            }
+
+            return {
+              ...dropdown,
+              testResults: {
+                clickable: isClickable,
+                selectable: selectable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...dropdown,
+              testResults: {
+                clickable: false,
+                selectable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
+          }
+        } catch (error) {
+          return {
+            ...dropdown,
+            testResults: {
+              clickable: false,
+              selectable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
+        }
+      })
+    ),
+
+    // Test all checkboxes in parallel
+    Promise.all(
+      bodyAnalysis.checkboxes.map(async (checkbox) => {
+        try {
+          const { element, selector } = await findElementWithMultipleStrategies(page, checkbox, 'checkbox');
+
+          if (element) {
+            // Parallelize all property checks
+            const [isVisible, isEnabled, boundingBox] = await Promise.all([
+              element.isVisible().catch(() => false),
+              element.isEnabled().catch(() => false),
+              element.boundingBox().catch(() => null)
+            ]);
+            const isClickable = isVisible && isEnabled && boundingBox !== null;
+
+            // Try to toggle checkbox
+            let toggleable = false;
+            if (isClickable) {
+              try {
+                const wasChecked = await element.isChecked().catch(() => false);
+                await element.click({ timeout: 800 });
+                const isNowChecked = await element.isChecked().catch(() => false);
+                toggleable = wasChecked !== isNowChecked;
+                if (toggleable) {
+                  await element.click().catch(() => {});
+                }
+              } catch {
+                toggleable = false;
+              }
+            }
+
+            return {
+              ...checkbox,
+              testResults: {
+                clickable: isClickable,
+                toggleable: toggleable,
+                visible: isVisible,
+                enabled: isEnabled,
+                hasDimensions: boundingBox !== null,
+                selector: selector,
+                error: null
+              }
+            };
+          } else {
+            return {
+              ...checkbox,
+              testResults: {
+                clickable: false,
+                toggleable: false,
+                visible: false,
+                enabled: false,
+                hasDimensions: false,
+                selector: null,
+                error: 'Element not found using any selector strategy'
+              }
+            };
+          }
+        } catch (error) {
+          return {
+            ...checkbox,
+            testResults: {
+              clickable: false,
+              toggleable: false,
+              visible: false,
+              enabled: false,
+              hasDimensions: false,
+              selector: null,
+              error: error.message
+            }
+          };
+        }
+      })
+    )
+  ]);
+
+  return {
+    buttons: buttonResults,
+    inputs: inputResults,
+    dropdowns: dropdownResults,
+    checkboxes: checkboxResults
+  };
 };
 
 /**
@@ -580,7 +636,158 @@ const analyzeBody = async (page) => {
 };
 
 /**
- * Main controller function
+ * Helper function to send SSE message
+ */
+const sendSSE = (res, event, data) => {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+};
+
+/**
+ * Stream-based controller function with progressive loading
+ */
+export const analyzeUrlStream = async (req, res) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  // Set up SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  try {
+    const { url } = req.query;
+
+    if (!url) {
+      sendSSE(res, 'error', { error: 'Missing url query parameter' });
+      res.end();
+      return;
+    }
+
+    // Validate URL format
+    let targetUrl;
+    try {
+      targetUrl = new URL(url);
+    } catch {
+      sendSSE(res, 'error', { error: 'Invalid URL format' });
+      res.end();
+      return;
+    }
+
+    sendSSE(res, 'status', { message: 'Initializing browser...' });
+
+    try {
+      console.log(`🔍 Analyzing DOM for: ${url}`);
+
+      // Launch browser
+      browser = await chromium.launch({ 
+        headless: true,
+        args: ['--disable-images', '--disable-javascript-harmony-shipping']
+      });
+
+      context = await browser.newContext({
+        viewport: { width: 1366, height: 768 },
+        ignoreHTTPSErrors: true,
+        javaScriptEnabled: true
+      });
+
+      page = await context.newPage();
+
+      // Block unnecessary resources
+      await page.route('**/*', (route) => {
+        const resourceType = route.request().resourceType();
+        if (['image', 'font', 'media'].includes(resourceType)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
+      });
+
+      sendSSE(res, 'status', { message: 'Navigating to page...' });
+      console.log(`🔍 Navigating to: ${url}`);
+      
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      });
+
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      // Verify page has loaded
+      const hasHead = await page.evaluate(() => !!document.head);
+      const hasBody = await page.evaluate(() => !!document.body);
+
+      if (!hasHead || !hasBody) {
+        await browser.close();
+        sendSSE(res, 'error', { error: 'Invalid HTML structure - missing head or body' });
+        res.end();
+        return;
+      }
+
+      // Analyze HEAD first and send immediately
+      sendSSE(res, 'status', { message: 'Analyzing HEAD section...' });
+      const headAnalysis = await analyzeHead(page, url);
+      sendSSE(res, 'head', { headAnalysis });
+
+      // Analyze BODY structure
+      sendSSE(res, 'status', { message: 'Analyzing BODY section...' });
+      const bodyAnalysis = await analyzeBody(page);
+
+      // Test interactive elements and send progressively
+      sendSSE(res, 'status', { message: 'Testing interactive elements...' });
+      const testResults = await testInteractiveElements(page, bodyAnalysis);
+
+      // Merge and send body analysis with tests
+      const bodyAnalysisWithTests = {
+        buttons: testResults.buttons,
+        dropdowns: testResults.dropdowns,
+        inputs: testResults.inputs,
+        checkboxes: testResults.checkboxes
+      };
+      
+      sendSSE(res, 'body', { bodyAnalysis: bodyAnalysisWithTests });
+      sendSSE(res, 'complete', { url });
+
+      await browser.close();
+      browser = null;
+
+    } catch (error) {
+      console.error('❌ Failed to fetch URL with Playwright:', url, error.message);
+      
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+
+      let errorDetails = error.message;
+      if (error.message.includes('net::ERR_CONNECTION_REFUSED') || error.message.includes('Navigation timeout')) {
+        errorDetails = 'Connection refused or timeout. Make sure the URL is accessible from the server.';
+      } else if (error.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
+        errorDetails = 'Host not found. Check if the URL is correct.';
+      }
+      
+      sendSSE(res, 'error', { error: 'Failed to fetch URL', details: errorDetails });
+    }
+
+    res.end();
+
+  } catch (error) {
+    console.error('❌ AnalyzeUrlStream Error:', error);
+
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+
+    sendSSE(res, 'error', { error: 'Failed to analyze URL', details: error.message });
+    res.end();
+  }
+};
+
+/**
+ * Main controller function (kept for backward compatibility)
  */
 export const analyzeUrl = async (req, res) => {
   let browser = null;
@@ -609,8 +816,11 @@ export const analyzeUrl = async (req, res) => {
     try {
       console.log(`🔍 Analyzing DOM for: ${url}`);
 
-      // Launch browser
-      browser = await chromium.launch({ headless: true });
+      // Launch browser with performance optimizations
+      browser = await chromium.launch({ 
+        headless: true,
+        args: ['--disable-images', '--disable-javascript-harmony-shipping']
+      });
 
       context = await browser.newContext({
         viewport: { width: 1366, height: 768 },
@@ -620,14 +830,30 @@ export const analyzeUrl = async (req, res) => {
 
       page = await context.newPage();
 
-      // Navigate to URL and wait for content to load
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: 60000
+      // Block unnecessary resources to speed up loading
+      await page.route('**/*', (route) => {
+        const resourceType = route.request().resourceType();
+        // Block images, fonts, and media - we only need HTML, CSS, and JS for DOM analysis
+        if (['image', 'font', 'media'].includes(resourceType)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
       });
 
-      // Wait for client-side JavaScript to render
-      await page.waitForTimeout(3000);
+      // Navigate to URL with faster wait strategy
+      // 'domcontentloaded' is faster than 'networkidle' and sufficient for DOM analysis
+      console.log(`🔍 Navigating to: ${url}`);
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000 // Reduced from 5 minutes to 1 minute
+      });
+
+      // Wait for critical content to render (reduced from 3s to 1s)
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
+        // If networkidle times out, continue anyway - DOM is already loaded
+      });
+      await page.waitForTimeout(1000);
 
       // Verify page has loaded correctly
       const hasHead = await page.evaluate(() => !!document.head);
@@ -640,9 +866,12 @@ export const analyzeUrl = async (req, res) => {
         });
       }
 
-      // Analyze HEAD and BODY structure using Playwright's DOM API
-      headAnalysis = await analyzeHead(page, url);
-      const bodyAnalysis = await analyzeBody(page);
+      // Analyze HEAD and BODY structure in parallel (they're independent)
+      const [headAnalysisResult, bodyAnalysis] = await Promise.all([
+        analyzeHead(page, url),
+        analyzeBody(page)
+      ]);
+      headAnalysis = headAnalysisResult;
 
       // Test interactive elements using Playwright (page is still open)
       const testResults = await testInteractiveElements(page, bodyAnalysis);

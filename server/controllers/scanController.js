@@ -31,8 +31,13 @@ export const scanWebsite = async (req, res) => {
     const consoleErrors = [];
     const networkErrors = [];
 
-    // Playwright launch
-    browser = await chromium.launch({ headless: true });
+    // Playwright launch with performance optimizations
+    // NOTE: Don't disable images - we need them for screenshots!
+    // We'll block fonts/media via route handler instead
+    browser = await chromium.launch({ 
+      headless: true,
+      args: ['--disable-javascript-harmony-shipping']
+    });
 
     context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
@@ -41,6 +46,18 @@ export const scanWebsite = async (req, res) => {
     });
 
     page = await context.newPage();
+
+    // Block unnecessary resources to speed up loading
+    // Note: We keep images for screenshots, but block fonts and media
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Block fonts and media - keep images for screenshots
+      if (['font', 'media'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
 
     // Log console errors
     page.on("console", (msg) => {
@@ -66,26 +83,35 @@ export const scanWebsite = async (req, res) => {
 
     console.log(`🔍 Navigating to: ${url}`);
 
+    // Navigate and wait for DOM to be ready
     await page.goto(url, {
-      waitUntil: "networkidle",
+      waitUntil: 'domcontentloaded',
       timeout: 60000
     });
 
-    // Wait a bit for client-side JS render
-    await page.waitForTimeout(3000);
+    // For viewport screenshot, we don't need to wait for networkidle
+    // Just wait briefly for initial render and some images to load
+    await page.waitForTimeout(800); // Brief wait for CSS/JS to render viewport
 
     const dom = await page.content();
 
-    // --- Screenshot Logic ---
+    // Take screenshot of viewport only (what's visible when page first loads)
+    const screenshotBuffer = await page.screenshot({ 
+      fullPage: false,
+      timeout: 5000
+    });
+    const screenshotBase64 = screenshotBuffer.toString("base64");
+
+    // --- Screenshot File Saving Logic ---
     const outputDir = path.join(process.cwd(), 'screenshots');
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const baseFilename = url.replace(/https?:\/\//, "").replace(/[^a-zA-Z0-9]/g, "_");
-    
-    // 1. Full Page Screenshot
-    const fullPageBase64 = await takeFullPageScreenshot(page);
-    const fullPageFilename = `${baseFilename}_${timestamp}_fullpage.png`;
-    fs.writeFileSync(path.join(outputDir, fullPageFilename), Buffer.from(fullPageBase64, "base64"));
-    // -------------------------
+    const screenshotFilename = `${baseFilename}_${timestamp}.png`;
+    fs.writeFileSync(path.join(outputDir, screenshotFilename), screenshotBuffer);
+    // ------------------------------------
 
     await browser.close();
 
@@ -94,12 +120,12 @@ export const scanWebsite = async (req, res) => {
       dom,
       consoleErrors,
       networkErrors,
-      screenshot: fullPageBase64 // Provide one screenshot to the LLM for analysis
+      screenshot: screenshotBase64 // Provide one screenshot to the LLM for analysis
     });
 
     return res.status(200).json({
       url,
-      screenshot: fullPageFilename, // Return single filename
+      screenshot: screenshotFilename, // Return single filename
       bugs: llmResult.bugs || [],
       fixes: llmResult.fixes || [],
       suggestions: llmResult.suggestions || [],
