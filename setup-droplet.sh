@@ -22,9 +22,10 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Update system
+# Update system (non-interactive to avoid prompts)
 print_status "Updating system packages..."
-apt-get update && apt-get upgrade -y
+export DEBIAN_FRONTEND=noninteractive
+apt-get update && apt-get upgrade -y -o Dpkg::Options::="--force-confold"
 
 # Install Docker
 print_status "Installing Docker..."
@@ -38,19 +39,19 @@ fi
 
 # Install Docker Compose
 print_status "Installing Docker Compose..."
-apt-get install -y docker-compose-plugin
+apt-get install -y -o Dpkg::Options::="--force-confold" docker-compose-plugin
 
 # Install Git
 print_status "Installing Git..."
-apt-get install -y git
+apt-get install -y -o Dpkg::Options::="--force-confold" git
 
 # Install Nginx (for reverse proxy)
 print_status "Installing Nginx..."
-apt-get install -y nginx
+apt-get install -y -o Dpkg::Options::="--force-confold" nginx
 
 # Install UFW (firewall)
 print_status "Configuring firewall..."
-apt-get install -y ufw
+apt-get install -y -o Dpkg::Options::="--force-confold" ufw
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
