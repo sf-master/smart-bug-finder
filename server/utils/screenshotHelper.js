@@ -16,6 +16,7 @@ export async function takeScrollScreenshots(page, options = {}) {
 
   let browser = null;
   let context = null;
+  let page = null;
 
   try {
     // Validate URL format
