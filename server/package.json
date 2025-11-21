@@ -13,23 +13,16 @@
     "postinstall": "node scripts/install-playwright.js"
   },
   "dependencies": {
-    "@babel/plugin-transform-private-property-in-object": "^7.27.1",
     "axios": "^1.6.8",
     "body-parser": "^1.20.3",
     "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
-    "groq-sdk": "^0.36.0",
-    "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.4",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
     "node-fetch": "^3.3.2",
     "openai": "^4.59.0",
-    "playwright": "^1.48.2",
-    "puppeteer": "^24.31.0",
-    "react-router-dom": "^7.9.6"
+    "playwright": "^1.48.2"
   },
   "devDependencies": {
-    "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "nodemon": "^3.1.11"
   }
 }
