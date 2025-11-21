@@ -14,7 +14,7 @@ app.use(
     cors({
       origin: CLIENT_ORIGIN,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"]
+      allowedHeaders: ["Content-Type", "Authorization", "ngrok-skip-browser-warning"]
     })
   );
   
