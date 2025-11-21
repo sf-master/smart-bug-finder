@@ -759,6 +759,15 @@ export const analyzeUrlStream = async (req, res) => {
         return;
       }
 
+      // Send console and network errors immediately (already collected in parallel via event listeners)
+      // Send them in parallel for better performance
+      const consoleData = {
+        errors: consoleErrors,
+        warnings: consoleWarnings
+      };
+      sendSSE(res, 'console', { consoleData });
+      sendSSE(res, 'network', { networkErrors });
+
       // Analyze HEAD first and send immediately
       sendSSE(res, 'status', { message: 'Analyzing HEAD section...' });
       const headAnalysis = await analyzeHead(page, url);
@@ -781,18 +790,6 @@ export const analyzeUrlStream = async (req, res) => {
       };
       
       sendSSE(res, 'body', { bodyAnalysis: bodyAnalysisWithTests });
-
-      // Collect and send console errors and warnings
-      sendSSE(res, 'status', { message: 'Collecting console errors and warnings...' });
-      const consoleData = {
-        errors: consoleErrors,
-        warnings: consoleWarnings
-      };
-      sendSSE(res, 'console', { consoleData });
-
-      // Send network errors
-      sendSSE(res, 'status', { message: 'Collecting network errors...' });
-      sendSSE(res, 'network', { networkErrors });
 
       sendSSE(res, 'complete', { url });
 
