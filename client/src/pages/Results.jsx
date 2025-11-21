@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import Loader from '../components/Loader';
 import BugCard from '../components/BugCard';
-import { scanWebsite, analyzeUrl } from '../services/api';
+import { scanWebsite, analyzeUrl, analyzeUrlStream } from '../services/api';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -21,6 +21,9 @@ const Results = () => {
   const [domAnalysis, setDomAnalysis] = useState(null);
   const [domLoading, setDomLoading] = useState(false);
   const [domError, setDomError] = useState('');
+  const [domStatus, setDomStatus] = useState('');
+  const [headLoading, setHeadLoading] = useState(false);
+  const [bodyLoading, setBodyLoading] = useState(false);
   const [pdfGenerating, setPdfGenerating] = useState(false);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [editedUrl, setEditedUrl] = useState('');
@@ -100,28 +103,70 @@ const Results = () => {
     return `data:image/png;base64,${data.screenshot}`;
   }, [data.screenshot]); // fallbackData.screenshot is stable, no need to include
 
-  // Fetch DOM analysis
+  // Fetch DOM analysis with progressive loading
   useEffect(() => {
     if (!url) return;
 
-    const fetchDomAnalysis = async () => {
-      try {
-        setDomLoading(true);
-        setDomError('');
-        const response = await analyzeUrl(url);
-        setDomAnalysis(response?.data || null);
-      } catch (err) {
-        const errorMessage = err?.response?.data?.error || err?.response?.data?.details || err?.message || 'Unknown error';
-        const details = err?.response?.data?.details ? `: ${err.response.data.details}` : '';
-        setDomError(`Unable to analyze DOM structure. ${errorMessage}${details}`);
-        setDomAnalysis(null);
-        console.error('DOM Analysis Error:', err);
-      } finally {
-        setDomLoading(false);
+    // Initialize state
+    setDomLoading(true);
+    setDomError('');
+    setDomStatus('');
+    setHeadLoading(true);
+    setBodyLoading(true);
+    setDomAnalysis(null);
+
+    // Use EventSource for streaming/progressive loading
+    const eventSource = analyzeUrlStream(url, ({ type, data }) => {
+      switch (type) {
+        case 'status':
+          setDomStatus(data.message || '');
+          break;
+        
+        case 'head':
+          setHeadLoading(false);
+          setDomAnalysis(prev => ({
+            ...prev,
+            headAnalysis: data.headAnalysis,
+            url: url
+          }));
+          break;
+        
+        case 'body':
+          setBodyLoading(false);
+          setDomAnalysis(prev => ({
+            ...prev,
+            bodyAnalysis: data.bodyAnalysis,
+            url: url
+          }));
+          break;
+        
+        case 'complete':
+          setDomLoading(false);
+          setDomStatus('');
+          break;
+        
+        case 'error':
+          setDomLoading(false);
+          setHeadLoading(false);
+          setBodyLoading(false);
+          setDomStatus('');
+          const errorMsg = data.error || 'Unknown error';
+          const details = data.details ? `: ${data.details}` : '';
+          setDomError(`Unable to analyze DOM structure. ${errorMsg}${details}`);
+          console.error('DOM Analysis Error:', data);
+          break;
+        
+        default:
+          break;
+      }
+    });
+
+    // Cleanup on unmount or URL change
+    return () => {
+      if (eventSource) {
+        eventSource.close();
       }
     };
-
-    fetchDomAnalysis();
   }, [url]);
 
   const handleDownload = async () => {
@@ -380,22 +425,43 @@ const Results = () => {
               </p>
             </div>
 
-            {domLoading ? (
-              <div className="card p-8 text-center">
-                <Loader />
-                <p className="mt-4 text-slate-600">Analyzing DOM structure...</p>
-              </div>
-            ) : domError ? (
+            {domError ? (
               <div className="card p-6 rounded-xl border border-rose-200 bg-rose-50 text-rose-900">
                 {domError}
               </div>
-            ) : domAnalysis ? (
+            ) : (
               <div className="space-y-8">
+                {/* Status Message */}
+                {domStatus && (
+                  <div className="card p-4 bg-blue-50 border border-blue-200">
+                    <div className="flex items-center gap-3">
+                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                      <p className="text-blue-700 font-medium">{domStatus}</p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Head Validation */}
                 <div className="card p-6 pdf-section">
-                  <h4 className="text-xl font-semibold text-slate-800 mb-4">
-                    Head Validation
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-xl font-semibold text-slate-800">
+                      Head Validation
+                    </h4>
+                    {headLoading && (
+                      <div className="flex items-center gap-2 text-sm text-slate-500">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+                        <span>Analyzing...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {headLoading && !domAnalysis?.headAnalysis ? (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <div className="h-12 w-12 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600 mb-4" />
+                      <p className="text-slate-600">Analyzing HEAD section...</p>
+                    </div>
+                  ) : domAnalysis?.headAnalysis ? (
+                    <>
 
                   {/* Title & Meta Tags */}
                   <div className="mb-6">
@@ -523,13 +589,31 @@ const Results = () => {
                       <p className="text-slate-500 text-sm">No link tags found</p>
                     )}
                   </div>
+                </>
+                  ) : null}
                 </div>
 
                 {/* Interactive Elements */}
                 <div className="card p-6 pdf-section">
-                  <h4 className="text-xl font-semibold text-slate-800 mb-4">
-                    Interactive Elements
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-xl font-semibold text-slate-800">
+                      Interactive Elements
+                    </h4>
+                    {bodyLoading && (
+                      <div className="flex items-center gap-2 text-sm text-slate-500">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-200 border-t-slate-600" />
+                        <span>Testing elements...</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {bodyLoading && !domAnalysis?.bodyAnalysis ? (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <div className="h-12 w-12 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600 mb-4" />
+                      <p className="text-slate-600">Testing interactive elements...</p>
+                    </div>
+                  ) : domAnalysis?.bodyAnalysis ? (
+                    <>
 
                   {/* Buttons */}
                   <div className="mb-6">
@@ -768,9 +852,11 @@ const Results = () => {
                       <p className="text-slate-500 text-sm">No checkboxes found</p>
                     )}
                   </div>
+                    </>
+                  ) : null}
                 </div>
               </div>
-            ) : null}
+            )}
           </section>
         </>
       )}

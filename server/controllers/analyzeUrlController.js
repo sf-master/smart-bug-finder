@@ -636,7 +636,158 @@ const analyzeBody = async (page) => {
 };
 
 /**
- * Main controller function
+ * Helper function to send SSE message
+ */
+const sendSSE = (res, event, data) => {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+};
+
+/**
+ * Stream-based controller function with progressive loading
+ */
+export const analyzeUrlStream = async (req, res) => {
+  let browser = null;
+  let context = null;
+  let page = null;
+
+  // Set up SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  try {
+    const { url } = req.query;
+
+    if (!url) {
+      sendSSE(res, 'error', { error: 'Missing url query parameter' });
+      res.end();
+      return;
+    }
+
+    // Validate URL format
+    let targetUrl;
+    try {
+      targetUrl = new URL(url);
+    } catch {
+      sendSSE(res, 'error', { error: 'Invalid URL format' });
+      res.end();
+      return;
+    }
+
+    sendSSE(res, 'status', { message: 'Initializing browser...' });
+
+    try {
+      console.log(`🔍 Analyzing DOM for: ${url}`);
+
+      // Launch browser
+      browser = await chromium.launch({ 
+        headless: true,
+        args: ['--disable-images', '--disable-javascript-harmony-shipping']
+      });
+
+      context = await browser.newContext({
+        viewport: { width: 1366, height: 768 },
+        ignoreHTTPSErrors: true,
+        javaScriptEnabled: true
+      });
+
+      page = await context.newPage();
+
+      // Block unnecessary resources
+      await page.route('**/*', (route) => {
+        const resourceType = route.request().resourceType();
+        if (['image', 'font', 'media'].includes(resourceType)) {
+          route.abort();
+        } else {
+          route.continue();
+        }
+      });
+
+      sendSSE(res, 'status', { message: 'Navigating to page...' });
+      console.log(`🔍 Navigating to: ${url}`);
+      
+      await page.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      });
+
+      await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      // Verify page has loaded
+      const hasHead = await page.evaluate(() => !!document.head);
+      const hasBody = await page.evaluate(() => !!document.body);
+
+      if (!hasHead || !hasBody) {
+        await browser.close();
+        sendSSE(res, 'error', { error: 'Invalid HTML structure - missing head or body' });
+        res.end();
+        return;
+      }
+
+      // Analyze HEAD first and send immediately
+      sendSSE(res, 'status', { message: 'Analyzing HEAD section...' });
+      const headAnalysis = await analyzeHead(page, url);
+      sendSSE(res, 'head', { headAnalysis });
+
+      // Analyze BODY structure
+      sendSSE(res, 'status', { message: 'Analyzing BODY section...' });
+      const bodyAnalysis = await analyzeBody(page);
+
+      // Test interactive elements and send progressively
+      sendSSE(res, 'status', { message: 'Testing interactive elements...' });
+      const testResults = await testInteractiveElements(page, bodyAnalysis);
+
+      // Merge and send body analysis with tests
+      const bodyAnalysisWithTests = {
+        buttons: testResults.buttons,
+        dropdowns: testResults.dropdowns,
+        inputs: testResults.inputs,
+        checkboxes: testResults.checkboxes
+      };
+      
+      sendSSE(res, 'body', { bodyAnalysis: bodyAnalysisWithTests });
+      sendSSE(res, 'complete', { url });
+
+      await browser.close();
+      browser = null;
+
+    } catch (error) {
+      console.error('❌ Failed to fetch URL with Playwright:', url, error.message);
+      
+      if (browser) {
+        await browser.close().catch(() => {});
+      }
+
+      let errorDetails = error.message;
+      if (error.message.includes('net::ERR_CONNECTION_REFUSED') || error.message.includes('Navigation timeout')) {
+        errorDetails = 'Connection refused or timeout. Make sure the URL is accessible from the server.';
+      } else if (error.message.includes('net::ERR_NAME_NOT_RESOLVED')) {
+        errorDetails = 'Host not found. Check if the URL is correct.';
+      }
+      
+      sendSSE(res, 'error', { error: 'Failed to fetch URL', details: errorDetails });
+    }
+
+    res.end();
+
+  } catch (error) {
+    console.error('❌ AnalyzeUrlStream Error:', error);
+
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
+
+    sendSSE(res, 'error', { error: 'Failed to analyze URL', details: error.message });
+    res.end();
+  }
+};
+
+/**
+ * Main controller function (kept for backward compatibility)
  */
 export const analyzeUrl = async (req, res) => {
   let browser = null;
