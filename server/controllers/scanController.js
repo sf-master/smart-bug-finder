@@ -1,6 +1,9 @@
 import { chromium } from "playwright";
 import { analyzeScanData } from "../utils/llmHelper.js";
 import { checkUrlAccessible } from "../utils/urlHelper.js";
+import { takeFullPageScreenshot, takeScrollScreenshots } from "../utils/screenshotHelper.js";
+import fs from "fs";
+import path from "path";
 
 export const scanWebsite = async (req, res) => {
   let browser = null;
@@ -32,7 +35,7 @@ export const scanWebsite = async (req, res) => {
     browser = await chromium.launch({ headless: true });
 
     context = await browser.newContext({
-      viewport: { width: 1366, height: 768 },
+      viewport: { width: 1920, height: 1080 },
       ignoreHTTPSErrors: true,
       javaScriptEnabled: true
     });
@@ -73,23 +76,30 @@ export const scanWebsite = async (req, res) => {
 
     const dom = await page.content();
 
-    const screenshotBuffer = await page.screenshot({ fullPage: true });
-    const screenshot = screenshotBuffer.toString("base64");
+    // --- Screenshot Logic ---
+    const outputDir = path.join(process.cwd(), 'screenshots');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const baseFilename = url.replace(/https?:\/\//, "").replace(/[^a-zA-Z0-9]/g, "_");
+    
+    // 1. Full Page Screenshot
+    const fullPageBase64 = await takeFullPageScreenshot(page);
+    const fullPageFilename = `${baseFilename}_${timestamp}_fullpage.png`;
+    fs.writeFileSync(path.join(outputDir, fullPageFilename), Buffer.from(fullPageBase64, "base64"));
+    // -------------------------
 
     await browser.close();
 
-    // Call LLM (Safe Retry)
     const llmResult = await analyzeScanData({
       url,
       dom,
       consoleErrors,
       networkErrors,
-      screenshot
+      screenshot: fullPageBase64 // Provide one screenshot to the LLM for analysis
     });
 
     return res.status(200).json({
       url,
-      screenshot,
+      screenshot: fullPageFilename, // Return single filename
       bugs: llmResult.bugs || [],
       fixes: llmResult.fixes || [],
       suggestions: llmResult.suggestions || [],
