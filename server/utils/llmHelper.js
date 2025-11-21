@@ -1,7 +1,5 @@
 import { openai } from "./openaiClient.js";
-import dotenv from "dotenv";
-import axios from "axios";
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Default to a common OpenAI model
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // Default to a more common OpenAI model
 
 const truncate = (text = "", max = 18000) =>
   text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
@@ -13,12 +11,12 @@ export const analyzeScanData = async ({
   networkErrors = [],
   screenshot
 }) => {
-  if (!process.env.OPENAI_API_KEY) {
+  if (!process.env.GROQ_API_KEY && !process.env.OPENAI_API_KEY) {
     return {
       bugs: [],
       fixes: [],
       suggestions: [],
-      rawLLMResponse: { error: "Missing OPENAI_API_KEY" }
+      rawLLMResponse: { error: "Missing GROQ_API_KEY (or OPENAI_API_KEY)" }
     };
   }
   if (!OPENAI_MODEL) {

@@ -89,16 +89,19 @@ const Results = () => {
 
   // Format screenshot for display
   const screenshotSrc = useMemo(() => {
-    if (!data.screenshot) return fallbackData.screenshot;
+    if (!data.screenshot || data.screenshot.includes('placehold.co')) {
+      return fallbackData.screenshot;
+    }
     
-    // If it's already a data URI or URL, return as is
-    if (data.screenshot.startsWith('data:') || data.screenshot.startsWith('http')) {
+    // If it's already a full URL, return as is
+    if (data.screenshot.startsWith('http')) {
       return data.screenshot;
     }
     
-    // If it's a base64 string, add the data URI prefix
-    return `data:image/png;base64,${data.screenshot}`;
-  }, [data.screenshot]); // fallbackData.screenshot is stable, no need to include
+    // In development, VITE_API_BASE_URL is empty, so we default to localhost
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5050';
+    return `${baseUrl}/screenshots/${data.screenshot}`;
+  }, [data.screenshot, fallbackData.screenshot]);
 
   // Fetch DOM analysis
   useEffect(() => {
