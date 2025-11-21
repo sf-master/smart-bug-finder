@@ -100,7 +100,13 @@ Screenshot length: ${screenshot?.length || 0}
       model: OPENAI_MODEL,
       messages: [
         { role: "system", content: systemMessage },
-        { role: "user", content: userMessage }
+        {
+          role: "user",
+          content: [
+            { type: "text", text: userMessage },
+            { type: "image_url", image_url: { url: `data:image/png;base64,${screenshot}` } }
+          ]
+        }
       ],
       temperature: 0.2,
       response_format: { type: "json_object" } // Ensure JSON output
